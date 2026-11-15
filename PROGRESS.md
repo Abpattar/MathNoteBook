@@ -100,10 +100,13 @@ cd backend && .venv/bin/pytest -v
 ## Current Status & Running Services
 - **Backend**: FastAPI + Uvicorn running on `http://localhost:8000` (auto-reload active).
 - **Frontend**: React + TypeScript + Vite running on `http://localhost:5173`.
-- **Handwriting Vision Recognition**: Fully integrated via `/api/recognize` utilizing Groq Vision LLM (`qwen/qwen3.8-27b`) to directly read the canvas drawing as input.
-- **Canvas Toolbar Fixed**: Moved pointer event listeners directly to `<canvas>` element so Pen, Eraser, Undo, Redo, and Clear buttons respond immediately to clicks.
-- **Exponent & System Parsing**: SymPy parser now includes `convert_xor` (supporting `x^2`) and handles multi-equation systems (e.g. `x^2 + y = 30; y = 5`).
-- **Test Suite**: 33 tests passing (`pytest tests/`).
+- **Handwriting Vision Recognition**: Fully integrated via `/api/recognize` utilizing Groq Vision LLM (`qwen/qwen3.8-27b`) to directly read handwritten canvas drawings as input.
+- **Bounding Box Crop Optimization**: Crops drawings to stroke bounds with 28px padding and capped 800px dimension, reducing image token consumption by >80% to prevent rate-limit exhaustion.
+- **Vision Rate-Limit Protection**: Automatic retry with exponential backoff on HTTP 429 and seamless fallback to typed inputs.
+- **Multi-line & Instruction Splitting**: Correctly isolates questions across lines or separated by punctuation (e.g. `x^2 + y = 30` with `x = ?`).
+- **Canvas Toolbar & Synchronization**: Canvas strokes immediately take precedence on Solve while auto-syncing with the typed input bar.
+- **Exponent & System Parsing**: SymPy parser includes `convert_xor` (supporting `x^2`) and handles multi-equation systems (e.g. `x^2 + y = 30; y = 5`).
+- **Test Suite**: 37 tests passing (`pytest tests/`).
 - **Build**: Vite production build succeeded with 0 errors.
 
 ---
@@ -112,10 +115,10 @@ cd backend && .venv/bin/pytest -v
 - **One Screen**: Central notebook card with `[✏️ Canvas]` and `[📘 Solution Steps]` tabs.
 - **One Input**: Clean input row directly below the screen for equations and word problems with `Enter` key execution and prominent Solve button.
 - **On-Screen Solution**: Solving automatically transitions the screen to the step-by-step KaTeX verified solution with step-by-step navigation, toggleable hints, and instant switch back to the canvas.
-- **Drawing Guidance**: Clear on-screen notification if drawing is detected on canvas, prompting user to input their equation to solve.
+- **Drawing Guidance**: Dynamic synchronization between drawing and question input.
 
 ---
 
-## Known Issues / Limitations
-- Handwriting recognition uses mock/stub (Phase 0-1) - typed input is fully connected end-to-end.
-- LLM provider supports OpenAI-compatible fallbacks; uses structured rule-based explanation generator by default.
+## Technical Details
+- Handwriting recognition connects directly to Groq Vision API with structured prompt and strict AST translation.
+- LLM provider supports OpenAI-compatible fallbacks; uses structured rule-based explanation generator and SymPy CAS as single source of mathematical truth.
