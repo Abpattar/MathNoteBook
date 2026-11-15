@@ -1,3 +1,4 @@
+import asyncio
 from fastapi import APIRouter, HTTPException, Depends, Query
 from pydantic import BaseModel, Field
 from typing import List, Optional, Dict, Any
@@ -232,9 +233,9 @@ async def recognize_handwriting(request: RecognizeRequest):
                             "type": "text",
                             "text": (
                                 "You are an expert handwritten math OCR reader. Look at this handwritten math on the screen. "
-                                "Transcribe every handwritten equation or expression accurately into plain text. "
-                                "Separate multiple equations with a semicolon (e.g. 'x^2 + y = 30; y = 5'). "
-                                "Output ONLY the transcribed math, without markdown or commentary."
+                                "Transcribe every handwritten equation, expression, or instruction accurately into plain text. "
+                                "If there are multiple equations or lines, separate them with a semicolon or newline (e.g. 'x^2 + y = 30; x = ?' or 'x + y = 10; y = 2'). "
+                                "Output ONLY the transcribed math, without markdown, quotes, backticks or commentary."
                             )
                         },
                         {"type": "image_url", "image_url": {"url": img_data}}
@@ -249,30 +250,53 @@ async def recognize_handwriting(request: RecognizeRequest):
             "Content-Type": "application/json",
             "User-Agent": "MathAI/1.0"
         }
-        async with httpx.AsyncClient(timeout=15.0) as client:
-            resp = await client.post(
-                f"{settings.vision_llm_base_url}/chat/completions",
-                json=payload,
-                headers=headers
-            )
-            if resp.status_code == 200:
-                raw_text = resp.json()["choices"][0]["message"]["content"].strip()
-                raw_text = raw_text.replace("`", "").strip()
-                result = await recognize_typed(RecognizeTypedRequest(text=raw_text))
-                result.recognized_text = raw_text
-                return result
-            else:
-                return RecognitionResult(
-                    candidates=[],
-                    needs_clarification=True,
-                    clarification=ClarificationRequest(
-                        id=str(uuid.uuid4())[:8],
-                        question=f"Could not read drawing (Vision status {resp.status_code}). Please check your drawing.",
-                        options=[],
-                        affected_region={"x": 0, "y": 0, "w": 0, "h": 0},
-                        symbol_in_question=""
-                    )
+        async with httpx.AsyncClient(timeout=20.0) as client:
+            max_retries = 3
+            for attempt in range(max_retries):
+                resp = await client.post(
+                    f"{settings.vision_llm_base_url}/chat/completions",
+                    json=payload,
+                    headers=headers
                 )
+                if resp.status_code == 200:
+                    raw_text = resp.json()["choices"][0]["message"]["content"].strip()
+                    raw_text = raw_text.replace("`", "").strip()
+                    result = await recognize_typed(RecognizeTypedRequest(text=raw_text))
+                    result.recognized_text = raw_text
+                    return result
+                elif resp.status_code == 429:
+                    if attempt < max_retries - 1:
+                        retry_after_hdr = resp.headers.get("retry-after")
+                        try:
+                            wait_time = float(retry_after_hdr) if retry_after_hdr else (1.5 * (attempt + 1))
+                        except (ValueError, TypeError):
+                            wait_time = 1.5 * (attempt + 1)
+                        await asyncio.sleep(min(wait_time, 3.5))
+                        continue
+                    else:
+                        return RecognitionResult(
+                            candidates=[],
+                            needs_clarification=True,
+                            clarification=ClarificationRequest(
+                                id=str(uuid.uuid4())[:8],
+                                question="The handwriting recognition service is temporarily busy (rate limit). Please wait a moment and click Solve again, or type your equation below.",
+                                options=[],
+                                affected_region={"x": 0, "y": 0, "w": 0, "h": 0},
+                                symbol_in_question=""
+                            )
+                        )
+                else:
+                    return RecognitionResult(
+                        candidates=[],
+                        needs_clarification=True,
+                        clarification=ClarificationRequest(
+                            id=str(uuid.uuid4())[:8],
+                            question=f"Could not read drawing (Vision status {resp.status_code}). Please check your drawing or type it below.",
+                            options=[],
+                            affected_region={"x": 0, "y": 0, "w": 0, "h": 0},
+                            symbol_in_question=""
+                        )
+                    )
     except Exception as e:
         return RecognitionResult(
             candidates=[],
@@ -332,16 +356,19 @@ async def recognize_typed(request: RecognizeTypedRequest):
         )
     
     import re
-    # Clean trailing or leading instructions like ", find x and y" or ", x = ?"
+    # Clean trailing or leading instructions like ", find x and y" or "\nx = ?" or "x = ?; x^2 + y = 30"
     clean_text = text
     instruction = None
-    for sep in [",", ";"]:
+    for sep in [";", "\n", ","]:
         if sep in clean_text:
-            parts = [p.strip() for p in clean_text.split(sep)]
-            last = parts[-1]
-            if any(kw in last.lower() for kw in ["find", "solve", "what is", "?", "for "]):
-                instruction = last
+            parts = [p.strip() for p in clean_text.split(sep) if p.strip()]
+            if parts and any(kw in parts[-1].lower() for kw in ["find", "solve", "what is", "?", "for "]):
+                instruction = parts[-1]
                 clean_text = sep.join(parts[:-1]).strip()
+                break
+            elif parts and any(kw in parts[0].lower() for kw in ["find", "solve", "what is", "?", "for "]):
+                instruction = parts[0]
+                clean_text = sep.join(parts[1:]).strip()
                 break
     
     clean_text = re.sub(r'^(solve|calculate|evaluate|simplify|find)\s+', '', clean_text, flags=re.IGNORECASE).strip()

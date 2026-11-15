@@ -46,11 +46,72 @@ export function MathCanvas({
 
   useTouchAction(canvasRef, !disabled);
 
+  const strokesRef = useRef(strokes);
+  useEffect(() => {
+    strokesRef.current = strokes;
+  }, [strokes]);
+
   useEffect(() => {
     if (onExportCanvas) {
       onExportCanvas(() => {
         const canvas = canvasRef.current;
-        return canvas ? canvas.toDataURL('image/png') : '';
+        if (!canvas) return '';
+        const currentStrokes = strokesRef.current;
+        if (!currentStrokes || currentStrokes.length === 0) {
+          return canvas.toDataURL('image/png');
+        }
+
+        // Calculate tight bounding box across all drawn stroke points
+        let minX = Infinity;
+        let minY = Infinity;
+        let maxX = -Infinity;
+        let maxY = -Infinity;
+
+        for (const s of currentStrokes) {
+          for (const pt of s.points) {
+            if (pt.x < minX) minX = pt.x;
+            if (pt.y < minY) minY = pt.y;
+            if (pt.x > maxX) maxX = pt.x;
+            if (pt.y > maxY) maxY = pt.y;
+          }
+        }
+
+        if (!isFinite(minX) || !isFinite(minY)) {
+          return canvas.toDataURL('image/png');
+        }
+
+        const scale = window.devicePixelRatio || 1;
+        const padding = 28;
+        const cropX = Math.max(0, (minX - padding) * scale);
+        const cropY = Math.max(0, (minY - padding) * scale);
+        const cropW = Math.min(canvas.width - cropX, (maxX - minX + padding * 2) * scale);
+        const cropH = Math.min(canvas.height - cropY, (maxY - minY + padding * 2) * scale);
+
+        if (cropW <= 0 || cropH <= 0) {
+          return canvas.toDataURL('image/png');
+        }
+
+        // Cap dimensions to max 800px for efficient vision inference & low token usage
+        const maxDim = 800;
+        let destW = cropW;
+        let destH = cropH;
+        if (destW > maxDim || destH > maxDim) {
+          const ratio = Math.min(maxDim / destW, maxDim / destH);
+          destW = Math.round(destW * ratio);
+          destH = Math.round(destH * ratio);
+        }
+
+        const offscreen = document.createElement('canvas');
+        offscreen.width = destW;
+        offscreen.height = destH;
+        const offCtx = offscreen.getContext('2d');
+        if (!offCtx) return canvas.toDataURL('image/png');
+
+        offCtx.fillStyle = '#ffffff';
+        offCtx.fillRect(0, 0, destW, destH);
+        offCtx.drawImage(canvas, cropX, cropY, cropW, cropH, 0, 0, destW, destH);
+
+        return offscreen.toDataURL('image/jpeg', 0.85);
       });
     }
   }, [onExportCanvas]);

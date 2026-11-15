@@ -31,6 +31,9 @@ function App() {
   const [notice, setNotice] = useState<{ message: string; type: 'info' | 'error' } | null>(null);
 
   const exportCanvasRef = useRef<() => string>(() => '');
+  const recognizeAbortRef = useRef<AbortController | null>(null);
+  const isRecognizingRef = useRef(false);
+
   const handleExportReady = useCallback((fn: () => string) => {
     exportCanvasRef.current = fn;
   }, []);
@@ -47,14 +50,25 @@ function App() {
     if (strokes.length === 0) {
       return;
     }
+
+    if (recognizeAbortRef.current) {
+      recognizeAbortRef.current.abort();
+    }
+
     const timer = setTimeout(async () => {
       const imageB64 = exportCanvasRef.current ? exportCanvasRef.current() : '';
-      if (!imageB64) return;
+      if (!imageB64 || isRecognizingRef.current) return;
+
+      const controller = new AbortController();
+      recognizeAbortRef.current = controller;
+      isRecognizingRef.current = true;
+
       try {
         const recRes = await fetch('/api/recognize', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ image_b64: imageB64, strokes })
+          body: JSON.stringify({ image_b64: imageB64, strokes }),
+          signal: controller.signal
         });
         if (recRes.ok) {
           const recData = await recRes.json();
@@ -62,11 +76,21 @@ function App() {
             setTypedInput(recData.recognized_text);
           }
         }
-      } catch {
-        // Background preview recognition error is non-fatal
+      } catch (err: any) {
+        if (err?.name !== 'AbortError') {
+          // Background preview recognition error is non-fatal
+        }
+      } finally {
+        isRecognizingRef.current = false;
       }
-    }, 1000);
-    return () => clearTimeout(timer);
+    }, 2500);
+
+    return () => {
+      clearTimeout(timer);
+      if (recognizeAbortRef.current) {
+        recognizeAbortRef.current.abort();
+      }
+    };
   }, [strokes]);
 
   const handleUndo = useCallback(() => {
@@ -99,6 +123,10 @@ function App() {
   }, []);
 
   const handleSolve = useCallback(async () => {
+    if (recognizeAbortRef.current) {
+      recognizeAbortRef.current.abort();
+    }
+
     const text = typedInput.trim();
     let candidates: any[] = [];
     let instruction: string | undefined = undefined;
@@ -129,17 +157,37 @@ function App() {
         }
 
         const recData = await recRes.json();
-        if (!recData.candidates || recData.candidates.length === 0) {
-          const question = recData.clarification?.question || 'Could not read handwriting from screen. Please check your drawing.';
+        if (recData.candidates && recData.candidates.length > 0) {
+          candidates = recData.candidates;
+          instruction = recData.instruction;
+          if (recData.recognized_text) {
+            setTypedInput(recData.recognized_text);
+          }
+        } else if (text) {
+          // Fallback to currently transcribed or typed text if vision is rate-limited or ambiguous
+          try {
+            const fallbackRes = await fetch('/api/recognize-typed', {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({ text })
+            });
+            if (fallbackRes.ok) {
+              const fallbackData = await fallbackRes.json();
+              if (fallbackData.candidates && fallbackData.candidates.length > 0) {
+                candidates = fallbackData.candidates;
+                instruction = fallbackData.instruction;
+              }
+            }
+          } catch {
+            // Ignore fallback error
+          }
+        }
+
+        if (candidates.length === 0) {
+          const question = recData.clarification?.question || 'Could not read handwriting from screen. Please check your drawing or type below.';
           setNotice({ message: question, type: 'error' });
           setIsLoading(false);
           return;
-        }
-
-        candidates = recData.candidates;
-        instruction = recData.instruction;
-        if (recData.recognized_text) {
-          setTypedInput(recData.recognized_text);
         }
       } else if (text) {
         // User typed equation or word problem
