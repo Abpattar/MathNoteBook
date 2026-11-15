@@ -37,17 +37,17 @@ export interface DiagramData {
   depth?: number;
 }
 
-export type DiagramType = 
-  | 'triangle' 
-  | 'rectangle' 
-  | 'circle' 
-  | 'parallelogram' 
-  | 'trapezium' 
-  | 'coordinate_plane' 
-  | 'bar_chart' 
-  | 'data_table' 
-  | 'cuboid' 
-  | 'cylinder' 
+export type DiagramType =
+  | 'triangle'
+  | 'rectangle'
+  | 'circle'
+  | 'parallelogram'
+  | 'trapezium'
+  | 'coordinate_plane'
+  | 'bar_chart'
+  | 'data_table'
+  | 'cuboid'
+  | 'cylinder'
   | 'cone';
 
 export interface DiagramProps {

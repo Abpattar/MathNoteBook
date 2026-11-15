@@ -21,9 +21,9 @@ export function RectangleGenerator(
     if (m.type === 'length') {
       const lower = m.label.toLowerCase();
       if (lower.includes('length') || lower === 'l') {
-        svg += `<text x="${x + rectWidth/2}" y="${y + rectHeight + 25}" text-anchor="middle" font-size="12">${m.value} ${m.unit}</text>`;
+        svg += `<text x="${x + rectWidth / 2}" y="${y + rectHeight + 25}" text-anchor="middle" font-size="12">${m.value} ${m.unit}</text>`;
       } else if (lower.includes('width') || lower.includes('breadth') || lower === 'w') {
-        svg += `<text x="${x - 15}" y="${y + rectHeight/2}" text-anchor="middle" font-size="12" transform="rotate(-90, ${x-15}, ${y+rectHeight/2})">${m.value} ${m.unit}</text>`;
+        svg += `<text x="${x - 15}" y="${y + rectHeight / 2}" text-anchor="middle" font-size="12" transform="rotate(-90, ${x - 15}, ${y + rectHeight / 2})">${m.value} ${m.unit}</text>`;
       }
     }
   }
