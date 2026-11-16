@@ -2,8 +2,12 @@ from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from contextlib import asynccontextmanager
 
-from config import settings
-from api import health, routes
+try:
+    from config import settings
+    from api import health, routes, orchestrator_routes
+except ImportError:
+    from src.config import settings
+    from src.api import health, routes, orchestrator_routes
 
 
 @asynccontextmanager
@@ -30,6 +34,7 @@ app.add_middleware(
 
 app.include_router(health.router)
 app.include_router(routes.router)
+app.include_router(orchestrator_routes.router)
 
 
 @app.get("/")

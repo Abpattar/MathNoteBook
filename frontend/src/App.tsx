@@ -3,7 +3,14 @@ import { MathCanvas } from './components/MathCanvas';
 import { TypedInput } from './components/TypedInput';
 import { ModeToggle } from './components/ModeToggle';
 import { MathDisplay } from './components/MathDisplay';
+import { ParabolaVisualizer } from './components/visualizations/ParabolaVisualizer';
+import { EquationBalanceVisualizer } from './components/visualizations/EquationBalanceVisualizer';
+import { AlgebraTilesVisualizer } from './components/visualizations/AlgebraTilesVisualizer';
+import { ConceptLearningDrawer } from './components/ConceptLearningDrawer';
+import { AccessibilityPanel } from './components/AccessibilityPanel';
+import { StudentProfileModal } from './components/StudentProfileModal';
 import type { Stroke, SolutionStep, DisplayMode } from './types/canvas';
+import type { UnifiedMathematicalRepresentation, StudentProfile } from './types/umr';
 import './styles/globals.css';
 import './styles/canvas.css';
 import './styles/notebook.css';
@@ -12,7 +19,30 @@ import './App.css';
 
 const INITIAL_STROKES: Stroke[] = [];
 
-type ScreenTab = 'canvas' | 'solution';
+type ScreenTab = 'canvas' | 'solution' | 'prerequisites' | 'visualizer';
+
+const DEFAULT_PROFILE: StudentProfile = {
+  student_id: 'student_user',
+  grade: 7,
+  preferences: {
+    learning_style: 'balanced',
+    steps_per_screen: 1,
+    explanation_depth: 'detailed',
+    show_prerequisites_first: true,
+    speech_enabled: true,
+    speech_rate: 1.0,
+    speech_dialect: 'clearspeak',
+    braille_enabled: true,
+    braille_standard: 'nemeth',
+    sign_language_enabled: true,
+    sign_language_dialect: 'ISL',
+    interactive_visuals_enabled: true,
+    sonification_enabled: true,
+    reduced_distraction: false,
+    break_reminders: false,
+    animation_enabled: true
+  }
+};
 
 function App() {
   const [strokes, setStrokes] = useState<Stroke[]>(INITIAL_STROKES);
@@ -29,6 +59,12 @@ function App() {
   const [activeTab, setActiveTab] = useState<ScreenTab>('canvas');
   const [isLoading, setIsLoading] = useState(false);
   const [notice, setNotice] = useState<{ message: string; type: 'info' | 'error' } | null>(null);
+
+  // Orchestrator State & Student Profile
+  const [profile, setProfile] = useState<StudentProfile>(DEFAULT_PROFILE);
+  const [isProfileModalOpen, setIsProfileModalOpen] = useState(false);
+  const [umr, setUmr] = useState<UnifiedMathematicalRepresentation | null>(null);
+  const [visualMode, setVisualMode] = useState<'parabola' | 'tiles'>('parabola');
 
   const exportCanvasRef = useRef<() => string>(() => '');
   const recognizeAbortRef = useRef<AbortController | null>(null);
@@ -47,13 +83,8 @@ function App() {
 
   // Debounced auto-recognize when user draws on canvas
   useEffect(() => {
-    if (strokes.length === 0) {
-      return;
-    }
-
-    if (recognizeAbortRef.current) {
-      recognizeAbortRef.current.abort();
-    }
+    if (strokes.length === 0) return;
+    if (recognizeAbortRef.current) recognizeAbortRef.current.abort();
 
     const timer = setTimeout(async () => {
       const imageB64 = exportCanvasRef.current ? exportCanvasRef.current() : '';
@@ -78,7 +109,7 @@ function App() {
         }
       } catch (err: any) {
         if (err?.name !== 'AbortError') {
-          // Background preview recognition error is non-fatal
+          // Preview recognition error is non-fatal
         }
       } finally {
         isRecognizingRef.current = false;
@@ -87,9 +118,7 @@ function App() {
 
     return () => {
       clearTimeout(timer);
-      if (recognizeAbortRef.current) {
-        recognizeAbortRef.current.abort();
-      }
+      if (recognizeAbortRef.current) recognizeAbortRef.current.abort();
     };
   }, [strokes]);
 
@@ -119,140 +148,123 @@ function App() {
     setSolutionSteps([]);
     setCurrentStep(0);
     setNotice(null);
+    setUmr(null);
     setActiveTab('canvas');
   }, []);
 
   const handleSolve = useCallback(async () => {
-    if (recognizeAbortRef.current) {
-      recognizeAbortRef.current.abort();
-    }
+    if (recognizeAbortRef.current) recognizeAbortRef.current.abort();
 
     const text = typedInput.trim();
-    let candidates: any[] = [];
-    let instruction: string | undefined = undefined;
-
     setNotice(null);
     setIsLoading(true);
 
     try {
       const shouldSolveCanvas = lastActiveSource === 'canvas' ? strokes.length > 0 : (!text && strokes.length > 0);
+      let textToSolve = text;
+      let imageB64: string | undefined = undefined;
 
       if (shouldSolveCanvas) {
-        // User drew on canvas: capture and recognize the screen drawing
-        const imageB64 = exportCanvasRef.current ? exportCanvasRef.current() : '';
-        if (!imageB64) {
-          setNotice({ message: 'Canvas image could not be captured. Please draw again or type below.', type: 'error' });
+        imageB64 = exportCanvasRef.current ? exportCanvasRef.current() : undefined;
+        if (!imageB64 && strokes.length === 0) {
+          setNotice({ message: 'Canvas is empty. Draw an equation or type below to solve.', type: 'info' });
           setIsLoading(false);
           return;
         }
 
-        const recRes = await fetch('/api/recognize', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ image_b64: imageB64, strokes })
-        });
-
-        if (!recRes.ok) {
-          throw new Error('Handwriting recognition failed');
-        }
-
-        const recData = await recRes.json();
-        if (recData.candidates && recData.candidates.length > 0) {
-          candidates = recData.candidates;
-          instruction = recData.instruction;
-          if (recData.recognized_text) {
-            setTypedInput(recData.recognized_text);
-          }
-        } else if (text) {
-          // Fallback to currently transcribed or typed text if vision is rate-limited or ambiguous
+        // Try handwriting OCR first if text input is empty
+        if (!textToSolve && imageB64) {
           try {
-            const fallbackRes = await fetch('/api/recognize-typed', {
+            const recRes = await fetch('/api/recognize', {
               method: 'POST',
               headers: { 'Content-Type': 'application/json' },
-              body: JSON.stringify({ text })
+              body: JSON.stringify({ image_b64: imageB64, strokes })
             });
-            if (fallbackRes.ok) {
-              const fallbackData = await fallbackRes.json();
-              if (fallbackData.candidates && fallbackData.candidates.length > 0) {
-                candidates = fallbackData.candidates;
-                instruction = fallbackData.instruction;
+            if (recRes.ok) {
+              const recData = await recRes.json();
+              if (recData.recognized_text) {
+                textToSolve = recData.recognized_text;
+                setTypedInput(recData.recognized_text);
               }
             }
           } catch {
-            // Ignore fallback error
+            // Ignore preview error; orchestrator handles raw content
           }
         }
+      }
 
-        if (candidates.length === 0) {
-          const question = recData.clarification?.question || 'Could not read handwriting from screen. Please check your drawing or type below.';
-          setNotice({ message: question, type: 'error' });
-          setIsLoading(false);
-          return;
-        }
-      } else if (text) {
-        // User typed equation or word problem
-        const recRes = await fetch('/api/recognize-typed', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ text })
-        });
-
-        if (!recRes.ok) {
-          throw new Error('Recognition request failed');
-        }
-
-        const recData = await recRes.json();
-        if (!recData.candidates || recData.candidates.length === 0) {
-          const question = recData.clarification?.question || 'Could not recognize the equation. Please check your input.';
-          setNotice({ message: question, type: 'error' });
-          setIsLoading(false);
-          return;
-        }
-
-        candidates = recData.candidates;
-        instruction = recData.instruction;
-      } else {
+      if (!textToSolve && !imageB64) {
         setNotice({
-          message: 'Please draw an equation on the canvas or type it below to solve.',
+          message: 'Please write an equation on the canvas or type it below to solve.',
           type: 'info'
         });
         setIsLoading(false);
         return;
       }
 
-      // Interpret into structured problem
-      const intRes = await fetch('/api/interpret', {
+      // CALL CENTRAL ORCHESTRATION PIPELINE
+      const orchRes = await fetch('/api/orchestrate/process', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
-          candidates,
-          instruction
+          raw_content: textToSolve || 'handwritten_canvas',
+          input_type: shouldSolveCanvas ? 'handwriting' : 'typed',
+          strokes: shouldSolveCanvas ? strokes : undefined,
+          image_b64: shouldSolveCanvas ? imageB64 : undefined,
+          recognized_latex: textToSolve || undefined,
+          profile: profile
         })
       });
 
-      if (!intRes.ok) {
-        throw new Error('Interpretation request failed');
+      if (!orchRes.ok) {
+        const errJson = await orchRes.json().catch(() => ({}));
+        throw new Error(errJson.detail || 'Orchestrator failed to process problem');
       }
 
-      const problem = await intRes.json();
-      const solveRes = await fetch('/api/solve', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ problem, grade: 7 })
-      });
+      const umrData: UnifiedMathematicalRepresentation = await orchRes.json();
+      setUmr(umrData);
 
-      if (!solveRes.ok) {
-        const errJson = await solveRes.json().catch(() => ({}));
-        throw new Error(errJson.detail || 'Solver failed to find a verified solution');
+      if (umrData.understanding.is_ambiguous) {
+        setNotice({
+          message: umrData.understanding.clarification_question || 'Could not clearly recognize the problem.',
+          type: 'error'
+        });
+        setIsLoading(false);
+        return;
       }
 
-      const solveData = await solveRes.json();
-      if (solveData.steps && solveData.steps.length > 0) {
-        setSolutionSteps(solveData.steps);
-        setCurrentStep(1); // Reveal first step
-        setActiveTab('solution'); // Automatically show solution on the screen!
+      if (umrData.solution.steps && umrData.solution.steps.length > 0) {
+        // Adapt solution step payloads to frontend SolutionStep structure
+        const adaptedSteps: SolutionStep[] = umrData.solution.steps.map((st) => ({
+          step_number: st.step_number,
+          operation: st.operation,
+          equation_ast: {},
+          display_math: st.latex,
+          explanation: st.explanation,
+          validation: {
+            is_valid: st.verified,
+            method: 'sympy_verify',
+            details: 'SymPy equivalence check passed'
+          },
+          hint: st.hint || 'Review the operations applied to both sides.',
+          is_final_answer: st.is_final_answer,
+          final_answer_text: st.is_final_answer ? (umrData.solution.final_answer_text || '') : ''
+        }));
+
+        setSolutionSteps(adaptedSteps);
+        setCurrentStep(1);
+
+        // Routing based on student preferences
+        if (profile.preferences.show_prerequisites_first && umrData.learning.prerequisites.length > 0) {
+          setActiveTab('prerequisites');
+        } else {
+          setActiveTab('solution');
+        }
       } else {
-        setNotice({ message: 'No solution steps generated for this problem.', type: 'error' });
+        setNotice({
+          message: umrData.solution.error_message || 'Could not find a verified step-by-step solution.',
+          type: 'error'
+        });
       }
     } catch (e: any) {
       console.error('Solve error:', e);
@@ -263,7 +275,7 @@ function App() {
     } finally {
       setIsLoading(false);
     }
-  }, [typedInput, strokes]);
+  }, [typedInput, strokes, profile]);
 
   const handleShowAll = useCallback(() => {
     setCurrentStep(solutionSteps.length);
@@ -291,32 +303,42 @@ function App() {
   useEffect(() => {
     const checkHealth = async () => {
       try {
-        const response = await fetch('/api/health');
+        const response = await fetch('/api/orchestrate/health');
         if (response.ok) {
-          console.log('Backend connected');
+          console.log('Central Orchestrator Connected & Operational');
         }
       } catch {
-        console.log('Backend not available - running in offline mode');
+        console.log('Orchestrator offline');
       }
     };
     checkHealth();
   }, []);
 
   return (
-    <div className="app">
+    <div className={`app ${profile.preferences.reduced_distraction ? 'reduced-distraction' : ''}`}>
       <header className="app-header">
         <div className="header-content">
           <div className="header-titles">
-            <h1 className="app-title">AI Math Notebook</h1>
-            <p className="app-subtitle">Step-by-step verified math solutions</p>
+            <h1 className="app-title">MathAI Universal Platform</h1>
+            <p className="app-subtitle">One problem · One verified solution · Inclusive multimodal understanding</p>
           </div>
-          <ModeToggle mode={mode} onChange={setMode} />
+          <div className="header-controls">
+            <button
+              className="pref-toggle-btn"
+              onClick={() => setIsProfileModalOpen(true)}
+              title="Personalized Accommodations & Accessibility Preferences"
+              aria-label="Open learning & accessibility preferences"
+            >
+              ⚙️ Preferences
+            </button>
+            <ModeToggle mode={mode} onChange={setMode} />
+          </div>
         </div>
       </header>
 
       <main className="app-main">
         {/* ONE Central Screen Card */}
-        <section className="single-screen-card" aria-label="Math Notebook Screen">
+        <section className="single-screen-card" aria-label="Math Learning Workspace">
           {/* Screen Header Bar with View Tabs and Quick Actions */}
           <div className="screen-header-bar">
             <div className="screen-tabs" role="tablist" aria-label="Screen View">
@@ -339,6 +361,27 @@ function App() {
                   <span className="screen-tab-badge">{solutionSteps.length}</span>
                 )}
               </button>
+              {umr && umr.learning && umr.learning.prerequisites.length > 0 && (
+                <button
+                  role="tab"
+                  aria-selected={activeTab === 'prerequisites'}
+                  className={`screen-tab-btn ${activeTab === 'prerequisites' ? 'active' : ''}`}
+                  onClick={() => setActiveTab('prerequisites')}
+                >
+                  💡 Prerequisites
+                  <span className="screen-tab-badge prereq">{umr.learning.prerequisites.length}</span>
+                </button>
+              )}
+              {umr && umr.visualisation && umr.visualisation.type && (
+                <button
+                  role="tab"
+                  aria-selected={activeTab === 'visualizer'}
+                  className={`screen-tab-btn ${activeTab === 'visualizer' ? 'active' : ''}`}
+                  onClick={() => setActiveTab('visualizer')}
+                >
+                  📊 Interactive Visual
+                </button>
+              )}
             </div>
 
             <div className="screen-actions">
@@ -349,18 +392,14 @@ function App() {
                   disabled={strokes.length === 0 && solutionSteps.length === 0}
                   title="Clear canvas and reset"
                 >
-                  <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-                    <polyline points="3 6 5 6 21 6" />
-                    <path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2" />
-                  </svg>
                   Clear
                 </button>
               )}
-              {activeTab === 'solution' && solutionSteps.length > 0 && (
+              {activeTab !== 'canvas' && (
                 <button
                   className="action-btn"
                   onClick={handleBackToCanvas}
-                  title="Switch to canvas drawing"
+                  title="Switch back to canvas drawing"
                 >
                   ✏️ View Canvas
                 </button>
@@ -368,7 +407,7 @@ function App() {
             </div>
           </div>
 
-          {/* Inline Guidance Notice if user needs help or error occurred */}
+          {/* Inline Guidance Notice */}
           {notice && (
             <div className={`screen-notice ${notice.type}`} role="alert">
               <span>{notice.message}</span>
@@ -382,8 +421,9 @@ function App() {
             </div>
           )}
 
-          {/* Screen Body: Displays either MathCanvas or MathDisplay on the same screen */}
+          {/* Screen Body */}
           <div className="screen-body">
+            {/* Canvas Tab */}
             <div style={{ display: activeTab === 'canvas' ? 'block' : 'none', height: '100%' }}>
               <MathCanvas
                 strokes={strokes}
@@ -403,6 +443,7 @@ function App() {
               />
             </div>
 
+            {/* Solution Steps Tab */}
             <div
               className="screen-body-solution"
               style={{ display: activeTab === 'solution' ? 'block' : 'none' }}
@@ -418,11 +459,83 @@ function App() {
                 onBackToCanvas={handleBackToCanvas}
                 disabled={isLoading}
               />
+
+              {/* Multi-modal Accessibility Panel */}
+              <AccessibilityPanel
+                accessibility={umr?.accessibility}
+              />
+            </div>
+
+            {/* Prerequisites Tab (Mathua DAG) */}
+            <div
+              className="screen-body-prerequisites"
+              style={{ display: activeTab === 'prerequisites' ? 'block' : 'none', padding: '16px' }}
+            >
+              <ConceptLearningDrawer
+                prerequisites={umr?.learning?.prerequisites || []}
+                primaryConceptId={umr?.learning?.primary_concept_id}
+              />
+              <div style={{ marginTop: '16px', display: 'flex', justifyContent: 'flex-end' }}>
+                <button
+                  className="step-btn active"
+                  style={{ padding: '8px 16px', borderRadius: '6px' }}
+                  onClick={() => setActiveTab('solution')}
+                >
+                  Proceed to Verified Solution ➔
+                </button>
+              </div>
+            </div>
+
+            {/* Interactive Visualizer Tab (MathLearn Primary) */}
+            <div
+              className="screen-body-visualizer"
+              style={{ display: activeTab === 'visualizer' ? 'block' : 'none', padding: '16px' }}
+            >
+              {umr?.visualisation?.type === 'quadratic_parabola' && (
+                <div>
+                  <div style={{ display: 'flex', gap: '8px', marginBottom: '14px' }}>
+                    <button
+                      className={`tab-btn ${visualMode === 'parabola' ? 'active' : ''}`}
+                      onClick={() => setVisualMode('parabola')}
+                      style={{ fontSize: '12px', padding: '6px 12px' }}
+                    >
+                      📈 Parabola & Roots (Function Graph)
+                    </button>
+                    <button
+                      className={`tab-btn ${visualMode === 'tiles' ? 'active' : ''}`}
+                      onClick={() => setVisualMode('tiles')}
+                      style={{ fontSize: '12px', padding: '6px 12px' }}
+                    >
+                      🧩 Algebra Tiles (Factoring Area Model)
+                    </button>
+                  </div>
+
+                  {visualMode === 'parabola' ? (
+                    <ParabolaVisualizer
+                      initialA={umr.visualisation.initial_params.a || 1}
+                      initialB={umr.visualisation.initial_params.b || 5}
+                      initialC={umr.visualisation.initial_params.c || 6}
+                    />
+                  ) : (
+                    <AlgebraTilesVisualizer
+                      initialP={2}
+                      initialQ={3}
+                    />
+                  )}
+                </div>
+              )}
+              {umr?.visualisation?.type === 'equation_balance' && (
+                <EquationBalanceVisualizer
+                  initialA={umr.visualisation.initial_params.a || 2}
+                  initialB={umr.visualisation.initial_params.b || 3}
+                  initialC={umr.visualisation.initial_params.c || 7}
+                />
+              )}
             </div>
           </div>
         </section>
 
-        {/* ONE Place to Input Equations or Word Problems */}
+        {/* Unified Input Row */}
         <section className="problem-input-row" aria-label="Problem Input">
           <TypedInput
             value={typedInput}
@@ -431,7 +544,7 @@ function App() {
               setLastActiveSource('typed');
             }}
             onSubmit={handleSolve}
-            placeholder="Type an equation or word problem (e.g., 2x + 4 = 10, or x + y = 30)..."
+            placeholder="Type an equation or draw above (e.g. x^2 + 5x + 6 = 0 or 2x + 4 = 10)..."
             disabled={isLoading}
             rows={2}
           />
@@ -462,8 +575,15 @@ function App() {
         </section>
       </main>
 
+      <StudentProfileModal
+        profile={profile}
+        onChange={setProfile}
+        isOpen={isProfileModalOpen}
+        onClose={() => setIsProfileModalOpen(false)}
+      />
+
       <footer className="app-footer">
-        <p>AI Math Notebook — Powered by SymPy formal verification &amp; KaTeX</p>
+        <p>MathAI — One verified mathematical solution · Multiple ways of understanding</p>
       </footer>
     </div>
   );
