@@ -40,17 +40,19 @@
 
 @media (prefers-color-scheme: dark) {
   :root {
-    --color-bg: #12121a;
-    --color-surface: #1e1e28;
-    --color-text: #e8e8f0;
-    --color-text-muted: #9a9ab8;
-    --color-primary: #5a9bff;
-    --color-primary-hover: #7ab0ff;
-    --color-border: #2d2d3a;
-    --color-border-focus: #5a9bff;
-    --canvas-bg: #1a1a24;
-    --canvas-grid: #2a2a38;
-    --katex-color: #e8e8f0;
+    --color-bg: #0b0f19;
+    --color-surface: #111827;
+    --color-surface-hover: #1f2937;
+    --color-surface-elevated: #1e293b;
+    --color-text: #f9fafb;
+    --color-text-muted: #cbd5e1;
+    --color-primary: #3b82f6;
+    --color-primary-hover: #60a5fa;
+    --color-border: #374151;
+    --color-border-focus: #3b82f6;
+    --canvas-bg: #0f172a;
+    --canvas-grid: #1e293b;
+    --katex-color: #f9fafb;
   }
 }
 

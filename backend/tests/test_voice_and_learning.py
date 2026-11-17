@@ -51,3 +51,4 @@ async def test_fsrs6_learning_review_endpoint():
         data2 = resp2.json()
         assert data2["streak"] == 0
         assert data2["status"] == "review_needed"
+

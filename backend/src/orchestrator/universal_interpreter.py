@@ -32,8 +32,14 @@ class UniversalMathInterpreter:
 
     def interpret(self, raw_text: str) -> Dict[str, Any]:
         text = raw_text.strip()
-        # Clean common prefixes
-        clean = re.sub(r'^(solve|calculate|evaluate|simplify|find)\s+', '', text, flags=re.IGNORECASE).strip()
+        # Clean common prefixes and repeated conversational verbs
+        clean = text
+        prev = None
+        while clean != prev:
+            prev = clean
+            clean = re.sub(r'^(solve(\s+for\s+\w+)?|calculate\s+value\s+of|calculate\s+value|calculate|evaluate|simplify|find\s+the\s+value\s+of|find|value\s+of)\s+', '', clean, flags=re.IGNORECASE).strip()
+            clean = re.sub(r'\s+for\s+[a-zA-Z]+$', '', clean, flags=re.IGNORECASE).strip()
+            clean = re.sub(r'\s+with\s+respect\s+to\s+[a-zA-Z]+$', '', clean, flags=re.IGNORECASE).strip()
 
         # 0. PEDAGOGICAL SHAPE CLARIFICATION (when shape is drawn/labeled without an explicit query)
         clarification = self._detect_shape_clarification(clean, text)
@@ -699,19 +705,41 @@ class UniversalMathInterpreter:
         return None
 
     def _match_algebra(self, clean: str, original: str) -> Dict[str, Any]:
+        # Pre-clean expression and standardize syntax
+        expr_str = clean
+        expr_str = re.sub(r'\\sqrt\{([^}]+)\}', r'sqrt(\1)', expr_str)
+        expr_str = re.sub(r'\b(?:root|square\s+root)\s+(?:of\s+)?(\d+|[a-zA-Z])', r'sqrt(\1)', expr_str, flags=re.IGNORECASE)
+        
+        # Clean any remaining filler words like "and", "please"
+        filler_pattern = r'\b(calculate\s+value\s+of|calculate\s+value|calculate|value\s+of|solve\s+for\s+\w+|solve|simplify|evaluate|find\s+the\s+value\s+of|find|for\s+[a-zA-Z]+|with\s+respect\s+to\s+[a-zA-Z]+|and|please|then|now|tell\s+me)\b'
+        prev = None
+        while expr_str != prev:
+            prev = expr_str
+            expr_str = re.sub(filler_pattern, ' ', expr_str, flags=re.IGNORECASE)
+            expr_str = re.sub(r'\s+', ' ', expr_str).strip()
+
+        # Deduplicate operators without breaking **
+        expr_str = re.sub(r'([+\-/])\s*([+\-/=])', r'\2', expr_str)
+        expr_str = re.sub(r'(?<!\*)\*(?!\*)\s*([+\-/=])', r'\1', expr_str)
+        expr_str = re.sub(r'\*{3,}', '**', expr_str)
+        expr_str = re.sub(r'^[+\-*/=\s]+', '', expr_str)
+        expr_str = re.sub(r'[+\-*/\s]+$', '', expr_str)
+        expr_str = expr_str.replace('\\times', '*').replace('\\div', '/').replace('^', '**')
+
         # Standard algebraic parser
         try:
-            if "=" in clean and clean.count("=") == 1:
-                left_str, right_str = clean.split("=")
+            if "=" in expr_str and expr_str.count("=") == 1:
+                left_str, right_str = expr_str.split("=")
                 l_expr = parse_expr(left_str.strip(), transformations=self.transformations)
                 r_expr = parse_expr(right_str.strip(), transformations=self.transformations)
                 eq = sp.Eq(l_expr, r_expr)
                 symbols = sorted([str(s) for s in eq.free_symbols])
-                is_quad = any(
-                    isinstance(arg, sp.Pow) and arg.exp == 2
-                    for sub in [l_expr, r_expr]
-                    for arg in (sub.args if hasattr(sub, "args") else [sub])
-                )
+                main_var = sp.Symbol(symbols[0]) if symbols else sp.Symbol('x')
+                try:
+                    deg = sp.degree(eq.lhs - eq.rhs, gen=main_var)
+                except Exception:
+                    deg = 1
+                is_quad = (deg == 2)
                 return {
                     "domain": "algebra",
                     "topic": "quadratic_equations" if is_quad else "linear_equations",
@@ -721,7 +749,7 @@ class UniversalMathInterpreter:
                     "unknowns": symbols or ["x"]
                 }
             else:
-                expr = parse_expr(clean, transformations=self.transformations)
+                expr = parse_expr(expr_str, transformations=self.transformations)
                 symbols = sorted([str(s) for s in expr.free_symbols])
                 return {
                     "domain": "algebra",
@@ -732,20 +760,20 @@ class UniversalMathInterpreter:
                     "unknowns": symbols or ["x"]
                 }
         except Exception:
-            # Pedagogical clarification fallback instead of failure
+            clean_cand = expr_str.replace('**', '^') if expr_str else (clean or "x^2 + 5x + 6 = 0")
             return {
                 "domain": "unknown",
                 "topic": "unknown",
                 "problem_type": "unknown",
                 "ast": None,
-                "latex": original,
+                "latex": clean_cand,
                 "unknowns": [],
                 "is_ambiguous": True,
-                "clarification_question": f"I couldn't quite determine the exact math goal for '{original}'. What would you like to do?",
+                "clarification_question": f"I couldn't quite determine the exact math goal for '{clean_cand}'. What would you like to do?",
                 "clarification_options": [
-                    f"Solve {original} for x",
-                    f"Simplify {original}",
-                    f"Calculate value of {original}"
+                    clean_cand,
+                    f"Solve: {clean_cand}",
+                    f"Simplify: {clean_cand}"
                 ]
             }
 

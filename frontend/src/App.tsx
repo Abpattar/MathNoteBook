@@ -14,6 +14,7 @@ import { ConceptLearningDrawer } from './components/ConceptLearningDrawer';
 import { AccessibilityPanel } from './components/AccessibilityPanel';
 import { StudentProfileModal } from './components/StudentProfileModal';
 import { LiveISLRecognitionModal } from './components/LiveISLRecognitionModal';
+import { TextbookView } from './components/TextbookView';
 import { soundEffects } from './utils/soundEffects';
 import type { Stroke, SolutionStep, DisplayMode } from './types/canvas';
 import type { UnifiedMathematicalRepresentation, StudentProfile } from './types/umr';
@@ -246,7 +247,16 @@ function App() {
   const handleSolve = useCallback(async (overrideText?: string | React.MouseEvent) => {
     if (recognizeAbortRef.current) recognizeAbortRef.current.abort();
 
-    const text = (typeof overrideText === 'string' ? overrideText : typedInput).trim();
+    let text = (typeof overrideText === 'string' ? overrideText : typedInput).trim();
+    // Pre-clean conversational prefixes and trailing "for x" from text
+    let prev = '';
+    while (text !== prev) {
+      prev = text;
+      text = text.replace(/^(solve(\s+for\s+\w+)?|simplify|calculate(\s+value\s+of)?|evaluate|find(\s+the\s+value\s+of)?|value\s+of)\s*/i, '').trim();
+      text = text.replace(/\s+for\s+[a-zA-Z]+$/i, '').trim();
+      text = text.replace(/\s+with\s+respect\s+to\s+[a-zA-Z]+$/i, '').trim();
+    }
+
     setNotice(null);
     setClarification(null);
     setIsLoading(true);
@@ -387,11 +397,27 @@ function App() {
   }, [typedInput, strokes, profile, lastActiveSource]);
 
   const handleClarificationSelect = useCallback((option: string) => {
+    // 1. If option contains a colon (e.g. "Solve for x: x^2 + 3 = 7"), extract the part after the colon
+    let clean = option;
+    if (clean.includes(':')) {
+      clean = clean.split(':').slice(1).join(':').trim();
+    }
+    // 2. Strip any and all repeated conversational command prefixes until stable
+    let prev = '';
+    while (clean !== prev) {
+      prev = clean;
+      clean = clean.replace(/^(solve(\s+for\s+\w+)?|simplify|calculate(\s+value\s+of)?|evaluate|find(\s+the\s+value\s+of)?|value\s+of)\s*/i, '').trim();
+      clean = clean.replace(/\s+for\s+[a-zA-Z]+$/i, '').trim();
+      clean = clean.replace(/\s+with\s+respect\s+to\s+[a-zA-Z]+$/i, '').trim();
+    }
+    // 3. Clean any leading/trailing operators
+    clean = clean.replace(/^[+\-*/=\s]+/, '').replace(/[+\-*/\s]+$/, '').trim();
+
     setClarification(null);
     setNotice(null);
-    setTypedInput(option);
+    setTypedInput(clean);
     setLastActiveSource('typed');
-    handleSolve(option);
+    handleSolve(clean);
   }, [handleSolve]);
 
   const handleHint = useCallback(() => {
@@ -427,8 +453,12 @@ function App() {
       <header className="app-header">
         <div className="header-content">
           <div className="header-titles">
-            <h1 className="app-title">MathAI Notebook</h1>
-            <p className="app-subtitle">Inclusive, Multimodal & Adaptive Mathematics Learning</p>
+            <h1 className="app-title">{mode === 'textbook' ? 'MathAI Academic Textbook' : 'MathAI Notebook'}</h1>
+            <p className="app-subtitle">
+              {mode === 'textbook'
+                ? 'Curriculum Chapter Theory, Axiomatic Proofs & Rigorous Derivation'
+                : 'Inclusive, Multimodal & Adaptive Mathematics Learning'}
+            </p>
           </div>
           <div className="header-controls">
             <button
@@ -445,7 +475,20 @@ function App() {
 
       {/* Main Single Unified Screen */}
       <main className="app-main">
-        <section className="single-screen-card" aria-label="Unified Mathematics Workspace">
+        {mode === 'textbook' ? (
+          <TextbookView
+            umr={umr}
+            steps={solutionSteps}
+            onSolveProblem={(val) => {
+              setTypedInput(val);
+              setLastActiveSource('typed');
+              handleSolve(val);
+            }}
+            onSwitchToNotebook={() => setMode('notebook')}
+            isLoading={isLoading}
+          />
+        ) : (
+          <section className="single-screen-card" aria-label="Unified Mathematics Workspace">
           {/* Screen Header Tabs */}
           <div className="screen-header-bar">
             <div className="screen-tabs" role="tablist">
@@ -720,6 +763,7 @@ function App() {
             </div>
           </div>
         </section>
+        )}
 
         {/* Unified Multimodal Input Row */}
         <section className="problem-input-row" aria-label="Problem Input">

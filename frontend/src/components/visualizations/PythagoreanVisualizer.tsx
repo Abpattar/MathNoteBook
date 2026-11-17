@@ -208,3 +208,4 @@ export const PythagoreanVisualizer: React.FC<PythagoreanVisualizerProps> = ({
     </div>
   );
 };
+

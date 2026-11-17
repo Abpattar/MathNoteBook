@@ -626,7 +626,7 @@ class SolverEngine:
         
         sym_var = symbols(variable)
         
-        if self._has_radical(expr):
+        if self._has_radical(expr, sym_var):
             return self._solve_radical(current_ast, variable, step_number)
         
         try:
@@ -928,14 +928,16 @@ class SolverEngine:
         ))
         return steps
     
-    def _has_radical(self, expr: Any) -> bool:
-        """Check if expression contains a radical."""
+    def _has_radical(self, expr: Any, variable: Optional[Any] = None) -> bool:
+        """Check if expression contains a radical. If variable is provided, only return True if the radical contains that variable."""
         if expr is None:
             return False
         if isinstance(expr, sp.Pow) and (expr.exp == sp.Rational(1, 2) or expr.exp == 0.5):
+            if variable is not None:
+                return variable in expr.base.free_symbols
             return True
         if hasattr(expr, 'args'):
-            return any(self._has_radical(arg) for arg in expr.args)
+            return any(self._has_radical(arg, variable) for arg in expr.args)
         return False
     
     def _solve_radical(self, ast: dict, variable: str, start_step: int) -> list[RawSolutionStep]:

@@ -15,3 +15,4 @@ describe('MathAI Visualizers and Utilities', () => {
     expect(repaired).toContain('}');
   });
 });
+

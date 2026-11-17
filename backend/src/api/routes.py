@@ -499,9 +499,9 @@ async def recognize_typed(request: RecognizeTypedRequest):
             id=str(uuid.uuid4())[:8],
             question=f"I couldn't quite determine the exact math goal for '{text}'. What would you like to do?",
             options=[
-                {"label": "Solve for x", "value": f"Solve {text} for x"},
+                {"label": "Solve for x", "value": text},
                 {"label": "Calculate Area / Perimeter", "value": f"{text}, find area"},
-                {"label": "Simplify Expression", "value": f"Simplify {text}"}
+                {"label": "Simplify Expression", "value": text}
             ],
             affected_region={"x": 0, "y": 0, "w": 0, "h": 0},
             symbol_in_question=text[:50]

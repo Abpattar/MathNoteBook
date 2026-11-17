@@ -19,10 +19,8 @@ OPERATOR_REPLACEMENTS = [
     (r'\bsquared\b', r'^2'),
     (r'\bcubed\b', r'^3'),
 
-    # Roots
-    (r'\bsquare\s+root\s+of\s+([^,\.\?]+)', r'\\sqrt{\g<1>}'),
-    (r'\bcube\s+root\s+of\s+([^,\.\?]+)', r'\\sqrt[3]{\g<1>}'),
-    (r'\broot\s+of\s+([^,\.\?]+)', r'\\sqrt{\g<1>}'),
+    # Roots - handles both "square root of 16" and "root 15"
+    (r'\b(?:square\s+root|cube\s+root|root)\s+(?:of\s+)?(\d+|[a-zA-Z])', r'\\sqrt{\g<1>}'),
 
     # Inequalities and Equality
     (r'\b(?:is\s+)?greater\s+than\s+or\s+equal\s+to\b', r'\\ge'),
@@ -64,10 +62,32 @@ OPERATOR_REPLACEMENTS = [
 ]
 
 
+def clean_conversational_verbs(text: str) -> str:
+    """
+    Strips conversational commands, filler words, and repeated verbs (e.g. 'Solve', 'Calculate value of', 'for x', 'and').
+    """
+    filler_pattern = r'\b(calculate\s+value\s+of|calculate\s+value|calculate|value\s+of|solve\s+for\s+\w+|solve|simplify|evaluate|find\s+the\s+value\s+of|find|for\s+[a-zA-Z]+|with\s+respect\s+to\s+[a-zA-Z]+|and|please|then|now|tell\s+me)\b'
+    prev = None
+    cleaned = text
+    # Loop to strip repeated nested commands until stable
+    while cleaned != prev:
+        prev = cleaned
+        cleaned = re.sub(filler_pattern, ' ', cleaned, flags=re.IGNORECASE)
+        cleaned = re.sub(r'\s+', ' ', cleaned).strip()
+
+    # Clean leading/trailing or duplicate operators without breaking **
+    cleaned = re.sub(r'([+\-/])\s*([+\-/=])', r'\2', cleaned)
+    cleaned = re.sub(r'(?<!\*)\*(?!\*)\s*([+\-/=])', r'\1', cleaned)
+    cleaned = re.sub(r'\*{3,}', '**', cleaned)
+    cleaned = re.sub(r'^[+\-*/=\s]+', '', cleaned)
+    cleaned = re.sub(r'[+\-*/\s]+$', '', cleaned)
+    return cleaned
+
+
 def normalize_voice_transcript(transcript: str) -> Dict[str, Any]:
     """
     Transforms spoken mathematical transcripts into standardized LaTeX and algebraic representations.
-    Preserves natural language if it is a geometry or word problem.
+    Aggressively removes conversational filler and repeated commands.
     """
     if not transcript or not transcript.strip():
         return {
@@ -80,9 +100,9 @@ def normalize_voice_transcript(transcript: str) -> Dict[str, Any]:
 
     text = transcript.strip().lower()
 
-    # Step 1: Detect if this is an explicit geometry/word problem command
+    # Step 1: Detect if this is an explicit geometry/word problem query
     is_word_problem = bool(re.search(
-        r'\b(find|calculate|determine|what\s+is|area|perimeter|volume|triangle|circle|hypotenuse|radius|diameter)\b',
+        r'\b(triangle|circle|hypotenuse|radius|diameter|perimeter|area\s+of|volume)\b',
         text
     ))
 
@@ -105,7 +125,11 @@ def normalize_voice_transcript(transcript: str) -> Dict[str, Any]:
     for pattern, replacement in OPERATOR_REPLACEMENTS:
         text = re.sub(pattern, replacement, text)
 
-    # Step 5: Clean up algebraic juxtapositions for variables: "2 x" -> "2x", "5 y" -> "5y"
+    # Step 5: Clean conversational verbs and filler if not a pure word problem
+    if not is_word_problem or "=" in text or "^" in text:
+        text = clean_conversational_verbs(text)
+
+    # Step 6: Clean up algebraic juxtapositions for variables: "2 x" -> "2x", "5 y" -> "5y"
     text = re.sub(r'(\d)\s+([a-zA-Z])(?=\s|[+\-*/=><\^]|$)', r'\1\2', text)
     # Clean redundant spaces around operators
     text = re.sub(r'\s*([+\-*/=><])\s*', r' \1 ', text)

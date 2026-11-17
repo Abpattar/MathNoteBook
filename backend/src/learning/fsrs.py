@@ -130,3 +130,4 @@ class FSRS6Engine:
             "mastery_pct": round(mastery_pct, 1),
             "status": "mastered" if new_streak >= 3 and mastery_pct >= 75.0 else ("learning" if is_correct else "review_needed")
         }
+

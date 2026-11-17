@@ -96,6 +96,14 @@ class HandwritingAdapter(BaseAdapter):
         text_to_parse = umr.input.recognized_latex or umr.input.raw_content or ""
         clean = text_to_parse.strip()
 
+        # Pre-clean conversational fillers and repeated verbs
+        filler_pattern = r'\b(calculate\s+value\s+of|calculate\s+value|calculate|value\s+of|solve\s+for\s+\w+|solve|simplify|evaluate|find\s+the\s+value\s+of|find|for\s+[a-zA-Z]+|with\s+respect\s+to\s+[a-zA-Z]+|and|please|then|now|tell\s+me)\b'
+        prev = None
+        while clean != prev:
+            prev = clean
+            clean = re.sub(filler_pattern, ' ', clean, flags=re.IGNORECASE).strip()
+        clean = re.sub(r'\s+', ' ', clean).strip()
+
         # Step 0: Detect malformed or incomplete expressions (dangling operators, e.g. "x + = 5", "3 + * 2")
         # Do not flag degree symbol ° or question marks in geometry diagrams as dangling operators
         is_geom_syntax = any(k in clean.lower() for k in ["°", "deg", "triangle", "angle", "radius", "circle"])
@@ -103,10 +111,13 @@ class HandwritingAdapter(BaseAdapter):
         if not is_geom_syntax and re.search(dangling_pattern, clean):
             umr.understanding.is_ambiguous = True
             umr.understanding.clarification_question = (
-                f"Incomplete expression detected in '{text_to_parse}'. "
+                f"Incomplete expression detected in '{clean}'. "
                 "A mathematical symbol or number appears to be missing before or after an operator."
             )
             return umr
+
+        clean = re.sub(r'^[+\-*/=\s]+', '', clean)
+        clean = re.sub(r'[+\-*/\s]+$', '', clean)
 
         # Step 1: Universal Mathematical Interpreter (Geometry, Mensuration, Coordinate, Calculus, Stats, Arithmetic, Algebra)
         interpreter = UniversalMathInterpreter()
@@ -148,15 +159,39 @@ class HandwritingAdapter(BaseAdapter):
                     self._enrich_understanding(umr)
                     return umr
 
-        # Truly unparsable - provide pedagogical clarification options
+        # Clean repeated command words and conversational filler
+        filler_pattern = r'\b(calculate\s+value\s+of|calculate\s+value|calculate|value\s+of|solve\s+for\s+\w+|solve|simplify|evaluate|find\s+the\s+value\s+of|find|for\s+[a-zA-Z]+|with\s+respect\s+to\s+[a-zA-Z]+|and|please|then|now|tell\s+me)\b'
+        clean_text = text_to_parse
+        prev = None
+        while clean_text != prev:
+            prev = clean_text
+            clean_text = re.sub(filler_pattern, ' ', clean_text, flags=re.IGNORECASE).strip()
+        clean_text = re.sub(r'\s+', ' ', clean_text).strip()
+        clean_text = re.sub(r'([+\-/])\s*([+\-/=])', r'\2', clean_text)
+        clean_text = re.sub(r'(?<!\*)\*(?!\*)\s*([+\-/=])', r'\1', clean_text)
+        clean_text = re.sub(r'\*{3,}', '**', clean_text)
+        clean_text = re.sub(r'^[+\-*/=\s]+', '', clean_text)
+        clean_text = re.sub(r'[+\-*/\s]+$', '', clean_text)
+
+        # Retry parsing clean text first before falling back to ambiguity
+        if clean_text and clean_text != text_to_parse:
+            parsed_clean = self.parse_string_to_ast(clean_text)
+            if parsed_clean:
+                umr.understanding.ast = parsed_clean["ast"]
+                umr.input.recognized_latex = parsed_clean["latex"]
+                self._enrich_understanding(umr)
+                return umr
+
+        # Truly unparsable - provide clean pedagogical clarification options
+        clean_cand = clean_text or text_to_parse or "x^2 + 5x + 6 = 0"
         umr.understanding.is_ambiguous = True
         umr.understanding.clarification_question = (
-            f"I couldn't quite determine the exact math goal for '{text_to_parse}'. What would you like to do?"
+            f"I couldn't quite determine the exact math goal for '{clean_cand}'. What would you like to do?"
         )
         umr.understanding.clarification_options = [
-            f"Solve {text_to_parse} for x",
-            f"Simplify {text_to_parse}",
-            f"Calculate value of {text_to_parse}"
+            clean_cand,
+            f"Solve: {clean_cand}",
+            f"Simplify: {clean_cand}"
         ]
 
         return umr
