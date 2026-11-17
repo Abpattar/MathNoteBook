@@ -60,6 +60,10 @@ class VisualizationAdapter(BaseAdapter):
         umr: UnifiedMathematicalRepresentation,
         profile: StudentProfile
     ) -> UnifiedMathematicalRepresentation:
+        # Preserve pre-generated geometry or SVG diagrams
+        if umr.visualisation.type in ("svg_diagram", "geometry_diagram"):
+            return umr
+
         topic = umr.understanding.topic
 
         if topic == "quadratic_equations":

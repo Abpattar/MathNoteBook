@@ -87,6 +87,29 @@ export interface SignSequenceItem {
   has_3d_template: boolean;
 }
 
+export interface StepGestureLayer {
+  title: string;
+  description: string;
+  tokens: SignSequenceItem[];
+  spatial_direction?: string;
+  action_sign?: string;
+  concept_signs?: string[];
+  rationale_text?: string;
+}
+
+export interface StepGestureData {
+  step_number: number;
+  latex: string;
+  operation: string;
+  explanation: string;
+  sign_sequence: SignSequenceItem[];
+  layers: {
+    layer_1_state: StepGestureLayer;
+    layer_2_action: StepGestureLayer;
+    layer_3_pedagogy: StepGestureLayer;
+  };
+}
+
 export interface SignLanguageData {
   is_supported: boolean;
   dialect: string;
@@ -97,6 +120,7 @@ export interface SignLanguageData {
   has_warnings: boolean;
   disclaimer: string;
   skeleton_playback_ready: boolean;
+  step_gestures?: StepGestureData[];
 }
 
 export interface AccessibilityPayload {
@@ -118,6 +142,7 @@ export interface SolutionStepPayload {
   hint?: string;
   visual_cue?: string;
   is_final_answer: boolean;
+  step_gestures?: StepGestureData;
 }
 
 export interface SolutionPayload {

@@ -83,6 +83,7 @@ export interface SolutionStep {
   hint: string;
   is_final_answer: boolean;
   final_answer_text: string;
+  step_gestures?: any;
 }
 
 export interface StructuredProblem {

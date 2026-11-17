@@ -26,6 +26,12 @@ class GeometryEngine:
                 steps.extend(self._solve_circle(shape, problem, step_number))
                 step_number = len(steps)
         
+        if steps:
+            if isinstance(steps[-1], dict):
+                steps[-1]["is_final_answer"] = True
+                if not steps[-1].get("final_answer_text"):
+                    steps[-1]["final_answer_text"] = steps[-1]["display_math"]
+
         return [GeometrySolutionStep(**s) if isinstance(s, dict) else s for s in steps]
     
     def _solve_triangle(self, shape: GeometryShape, problem: GeometryProblem, start_step: int) -> List[Dict[str, Any]]:
@@ -36,38 +42,73 @@ class GeometryEngine:
         lengths = [m for m in shape.measurements if m.measurement_type == MeasurementType.LENGTH]
         
         if len(angles) == 2:
-            step_number += 1
-            known_sum = sum(a.value for a in angles)
+            a1_val = int(angles[0].value) if angles[0].value.is_integer() else angles[0].value
+            a2_val = int(angles[1].value) if angles[1].value.is_integer() else angles[1].value
+            known_sum = a1_val + a2_val
             missing_angle = 180 - known_sum
             
-            ast = {
-                "type": "eq",
-                "left": {"type": "add", "args": [{"type": "number", "value": angles[0].value}, {"type": "number", "value": angles[1].value}, {"type": "symbol", "name": "x"}]},
-                "right": {"type": "number", "value": 180}
-            }
-            
-            result_ast = {
-                "type": "eq",
-                "left": {"type": "symbol", "name": "x"},
-                "right": {"type": "number", "value": missing_angle}
-            }
-            
+            # Step 1: Set up the angle sum equation
+            step_number += 1
             steps.append({
                 "step_number": step_number,
-                "operation": "angle_sum_triangle",
-                "equation_ast": ast,
-                "display_math": f"{angles[0].label} + {angles[1].label} + x = 180^\\circ",
-                "explanation": "The sum of angles in a triangle is 180 degrees.",
+                "operation": "angle_sum_theorem",
+                "equation_ast": {
+                    "type": "eq",
+                    "left": {"type": "add", "args": [{"type": "number", "value": float(a1_val)}, {"type": "number", "value": float(a2_val)}, {"type": "symbol", "name": "x"}]},
+                    "right": {"type": "number", "value": 180}
+                },
+                "display_math": f"{a1_val}^\\circ + {a2_val}^\\circ + x = 180^\\circ",
+                "explanation": "The sum of interior angles in any triangle is always 180 degrees.",
                 "validation": {"is_valid": True, "method": "angle_sum", "details": "Triangle angle sum theorem"},
-                "hint": "Add the two known angles and subtract from 180.",
+                "hint": "Set up the equation with the two known angles plus x equal to 180.",
                 "is_final_answer": False,
                 "final_answer_text": "",
-                "diagram_focus": [a.label for a in angles],
+                "diagram_focus": [a.label for a in angles if a.label],
+                "diagram_type": "triangle"
+            })
+            
+            # Step 2: Combine known angles
+            step_number += 1
+            steps.append({
+                "step_number": step_number,
+                "operation": "combine_angles",
+                "equation_ast": {
+                    "type": "eq",
+                    "left": {"type": "add", "args": [{"type": "number", "value": float(known_sum)}, {"type": "symbol", "name": "x"}]},
+                    "right": {"type": "number", "value": 180}
+                },
+                "display_math": f"{known_sum}^\\circ + x = 180^\\circ",
+                "explanation": f"Add the two known angles: {a1_val}° + {a2_val}° = {known_sum}°.",
+                "validation": {"is_valid": True, "method": "addition", "details": f"{a1_val} + {a2_val} = {known_sum}"},
+                "hint": f"Add the known angles together to simplify: {a1_val} + {a2_val} = {known_sum}.",
+                "is_final_answer": False,
+                "final_answer_text": "",
+                "diagram_focus": ["known_sum"],
+                "diagram_type": "triangle"
+            })
+            
+            # Step 3: Solve for the missing angle
+            step_number += 1
+            steps.append({
+                "step_number": step_number,
+                "operation": "solve_missing_angle",
+                "equation_ast": {
+                    "type": "eq",
+                    "left": {"type": "symbol", "name": "x"},
+                    "right": {"type": "number", "value": float(missing_angle)}
+                },
+                "display_math": f"x = 180^\\circ - {known_sum}^\\circ = {missing_angle}^\\circ",
+                "explanation": f"Subtract {known_sum}° from 180° to isolate the missing angle: x = {missing_angle}°.",
+                "validation": {"is_valid": True, "method": "subtraction", "details": f"180 - {known_sum} = {missing_angle}"},
+                "hint": f"Subtract {known_sum} from 180.",
+                "is_final_answer": True,
+                "final_answer_text": f"x = {missing_angle}^\\circ",
+                "diagram_focus": ["x"],
                 "diagram_type": "triangle"
             })
             
             shape.measurements.append(GeometryMeasurement(
-                value=missing_angle,
+                value=float(missing_angle),
                 unit="degrees",
                 measurement_type=MeasurementType.ANGLE,
                 label="x"
@@ -87,30 +128,72 @@ class GeometryEngine:
                         hypotenuse = sorted_lengths[2]
             
             if leg_a and leg_b and not hypotenuse:
-                step_number += 1
-                c_squared = leg_a.value**2 + leg_b.value**2
+                a_v = int(leg_a.value) if leg_a.value.is_integer() else leg_a.value
+                b_v = int(leg_b.value) if leg_b.value.is_integer() else leg_b.value
+                c_squared = a_v**2 + b_v**2
                 c = math.sqrt(c_squared)
+                c_val = int(c) if c.is_integer() else round(c, 2)
                 
-                ast = {
-                    "type": "eq",
-                    "left": {"type": "add", "args": [
-                        {"type": "pow", "base": {"type": "symbol", "name": "a"}, "exp": {"type": "number", "value": 2}},
-                        {"type": "pow", "base": {"type": "symbol", "name": "b"}, "exp": {"type": "number", "value": 2}}
-                    ]},
-                    "right": {"type": "pow", "base": {"type": "symbol", "name": "c"}, "exp": {"type": "number", "value": 2}}
-                }
-                
+                # Step 1: State Pythagorean theorem
+                step_number += 1
                 steps.append({
                     "step_number": step_number,
                     "operation": "apply_pythagoras",
-                    "equation_ast": ast,
-                    "display_math": f"{leg_a.value}^2 + {leg_b.value}^2 = c^2",
-                    "explanation": f"Apply Pythagoras theorem: a² + b² = c². So {leg_a.value}² + {leg_b.value}² = {c:.2f}².",
-                    "validation": {"is_valid": True, "method": "pythagoras", "details": f"c = sqrt({leg_a.value}^2 + {leg_b.value}^2) = {c:.2f}"},
-                    "hint": "Square the legs, add them, then take the square root.",
+                    "equation_ast": {
+                        "type": "eq",
+                        "left": {"type": "add", "args": [
+                            {"type": "pow", "base": {"type": "number", "value": float(a_v)}, "exp": {"type": "number", "value": 2}},
+                            {"type": "pow", "base": {"type": "number", "value": float(b_v)}, "exp": {"type": "number", "value": 2}}
+                        ]},
+                        "right": {"type": "pow", "base": {"type": "symbol", "name": "c"}, "exp": {"type": "number", "value": 2}}
+                    },
+                    "display_math": f"a^2 + b^2 = c^2 \\implies {a_v}^2 + {b_v}^2 = c^2",
+                    "explanation": f"Apply Pythagoras theorem: a² + b² = c² where a and b are the legs, and c is the hypotenuse.",
+                    "validation": {"is_valid": True, "method": "pythagoras", "details": f"{a_v}^2 + {b_v}^2 = c^2"},
+                    "hint": "Square both legs and add them together.",
                     "is_final_answer": False,
                     "final_answer_text": "",
                     "diagram_focus": ["a", "b", "c"],
+                    "diagram_type": "triangle"
+                })
+
+                # Step 2: Compute squares
+                step_number += 1
+                steps.append({
+                    "step_number": step_number,
+                    "operation": "compute_squares",
+                    "equation_ast": {
+                        "type": "eq",
+                        "left": {"type": "number", "value": float(c_squared)},
+                        "right": {"type": "pow", "base": {"type": "symbol", "name": "c"}, "exp": {"type": "number", "value": 2}}
+                    },
+                    "display_math": f"{a_v**2} + {b_v**2} = c^2 \\implies c^2 = {c_squared}",
+                    "explanation": f"Calculate the squares: {a_v}² = {a_v**2} and {b_v}² = {b_v**2}. Their sum is {c_squared}.",
+                    "validation": {"is_valid": True, "method": "addition", "details": f"{a_v**2} + {b_v**2} = {c_squared}"},
+                    "hint": f"Take the square root of {c_squared} to find c.",
+                    "is_final_answer": False,
+                    "final_answer_text": "",
+                    "diagram_focus": ["c^2"],
+                    "diagram_type": "triangle"
+                })
+
+                # Step 3: Solve for hypotenuse
+                step_number += 1
+                steps.append({
+                    "step_number": step_number,
+                    "operation": "solve_hypotenuse",
+                    "equation_ast": {
+                        "type": "eq",
+                        "left": {"type": "symbol", "name": "c"},
+                        "right": {"type": "number", "value": float(c_val)}
+                    },
+                    "display_math": f"c = \\sqrt{{{c_squared}}} = {c_val}",
+                    "explanation": f"Take the positive square root of both sides to find the hypotenuse: c = {c_val}.",
+                    "validation": {"is_valid": True, "method": "square_root", "details": f"sqrt({c_squared}) = {c_val}"},
+                    "hint": f"The hypotenuse length is {c_val}.",
+                    "is_final_answer": True,
+                    "final_answer_text": f"c = {c_val}",
+                    "diagram_focus": ["c"],
                     "diagram_type": "triangle"
                 })
         
@@ -167,8 +250,8 @@ class GeometryEngine:
                 "explanation": f"Circumference of a circle: C = 2πr. With r = {radius.value}, C = 2π × {radius.value} ≈ {float(circ):.2f}.",
                 "validation": {"is_valid": True, "method": "formula", "details": f"C = 2πr = {float(circ):.2f}"},
                 "hint": "Use C = 2πr.",
-                "is_final_answer": False,
-                "final_answer_text": "",
+                "is_final_answer": True,
+                "final_answer_text": f"C \\approx {float(circ):.2f}",
                 "diagram_focus": ["C", "r"],
                 "diagram_type": "circle"
             })
@@ -693,8 +776,8 @@ class StatisticsEngine:
                 "explanation": f"Mean = sum of all values ÷ number of values = {sum(data)} ÷ {len(data)} = {mean:.2f}.",
                 "validation": {"is_valid": True, "method": "formula", "details": f"Mean = Σx/n = {mean:.2f}"},
                 "hint": "Add all values, divide by count.",
-                "is_final_answer": False,
-                "final_answer_text": "",
+                "is_final_answer": True,
+                "final_answer_text": f"\\bar{{x}} = {mean:.2f}",
                 "diagram_focus": ["mean", "data"],
                 "diagram_type": "bar_chart"
             })
@@ -716,8 +799,8 @@ class StatisticsEngine:
                 "explanation": f"Median = middle value of sorted data. Sorted: {sorted_data}. Median = {median}.",
                 "validation": {"is_valid": True, "method": "formula", "details": f"Median = {median}"},
                 "hint": "Sort data, find middle value (or average of two middle values).",
-                "is_final_answer": False,
-                "final_answer_text": "",
+                "is_final_answer": True,
+                "final_answer_text": f"\\text{{median}} = {median}",
                 "diagram_focus": ["median", "data"],
                 "diagram_type": "bar_chart"
             })

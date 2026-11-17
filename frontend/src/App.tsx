@@ -6,6 +6,7 @@ import { MathDisplay } from './components/MathDisplay';
 import { ParabolaVisualizer } from './components/visualizations/ParabolaVisualizer';
 import { EquationBalanceVisualizer } from './components/visualizations/EquationBalanceVisualizer';
 import { AlgebraTilesVisualizer } from './components/visualizations/AlgebraTilesVisualizer';
+import { GeometryDiagramVisualizer } from './components/visualizations/GeometryDiagramVisualizer';
 import { ConceptLearningDrawer } from './components/ConceptLearningDrawer';
 import { AccessibilityPanel } from './components/AccessibilityPanel';
 import { StudentProfileModal } from './components/StudentProfileModal';
@@ -248,7 +249,8 @@ function App() {
           },
           hint: st.hint || 'Review the operations applied to both sides.',
           is_final_answer: st.is_final_answer,
-          final_answer_text: st.is_final_answer ? (umrData.solution.final_answer_text || '') : ''
+          final_answer_text: st.is_final_answer ? (umrData.solution.final_answer_text || '') : '',
+          step_gestures: st.step_gestures || null
         }));
 
         setSolutionSteps(adaptedSteps);
@@ -529,6 +531,13 @@ function App() {
                   initialA={umr.visualisation.initial_params.a || 2}
                   initialB={umr.visualisation.initial_params.b || 3}
                   initialC={umr.visualisation.initial_params.c || 7}
+                />
+              )}
+              {(umr?.visualisation?.type === 'svg_diagram' || umr?.visualisation?.type === 'geometry_diagram') && (
+                <GeometryDiagramVisualizer
+                  svgCode={umr.visualisation.initial_params.svg_code}
+                  topic={umr.visualisation.initial_params.topic || umr.understanding.topic}
+                  description={umr.visualisation.description}
                 />
               )}
             </div>

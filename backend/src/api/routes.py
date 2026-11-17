@@ -232,10 +232,17 @@ async def recognize_handwriting(request: RecognizeRequest):
                         {
                             "type": "text",
                             "text": (
-                                "You are an expert handwritten math OCR reader. Look at this handwritten math on the screen. "
-                                "Transcribe every handwritten equation, expression, or instruction accurately into plain text. "
-                                "If there are multiple equations or lines, separate them with a semicolon or newline (e.g. 'x^2 + y = 30; x = ?' or 'x + y = 10; y = 2'). "
-                                "Output ONLY the transcribed math, without markdown, quotes, backticks or commentary."
+                                "You are an expert mathematical and geometric drawing OCR reader. Look at the handwritten drawing or problem on the screen.\n"
+                                "1. If it is an algebraic or arithmetic equation/expression, transcribe the math accurately into plain text (e.g. 'x^2 + 5x + 6 = 0' or 'x + y = 10; y = 2').\n"
+                                "2. If it is a geometric diagram (e.g. triangle, right triangle, rectangle, circle, polygon, angles):\n"
+                                "   - Identify the shape and all labeled angles (including right-angle symbols as 90°), side lengths, and target unknown ('?' or 'x').\n"
+                                "   - Formulate as a concise geometric problem statement, e.g.:\n"
+                                "     'Right triangle with angles 38°, 90°, find ?'\n"
+                                "     'Right triangle with legs 3 and 4, find hypotenuse'\n"
+                                "     'Circle with radius 5, find area'\n"
+                                "     'Rectangle with length 8 and width 5, find perimeter'\n"
+                                "   - Even if you see fragmented labels like '38°; 90°; ?', identify the diagram and write: 'Right triangle with angles 38°, 90°, find ?'.\n"
+                                "3. Output ONLY the transcribed math or geometric problem, without markdown, quotes, backticks or commentary."
                             )
                         },
                         {"type": "image_url", "image_url": {"url": img_data}}

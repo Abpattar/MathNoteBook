@@ -91,6 +91,14 @@
   padding: var(--spacing-xs) 0;
 }
 
+.step-actions-row {
+  display: flex;
+  align-items: center;
+  gap: var(--spacing-sm);
+  flex-wrap: wrap;
+  margin-top: var(--spacing-xs);
+}
+
 .step-hint-btn {
   display: inline-flex;
   align-items: center;
@@ -101,12 +109,121 @@
   color: var(--color-warning);
   background: rgba(245, 124, 0, 0.1);
   border-radius: var(--radius-full);
-  margin-top: var(--spacing-xs);
   transition: background-color var(--transition-fast);
 }
 
 .step-hint-btn:hover:not(:disabled) {
   background: rgba(245, 124, 0, 0.2);
+}
+
+.step-gesture-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--spacing-xs);
+  padding: var(--spacing-xs) var(--spacing-sm);
+  font-size: 0.8125rem;
+  font-weight: 500;
+  color: #0d9488;
+  background: rgba(13, 148, 136, 0.1);
+  border-radius: var(--radius-full);
+  transition: all var(--transition-fast);
+  cursor: pointer;
+  border: 1px solid rgba(13, 148, 136, 0.3);
+}
+
+.step-gesture-btn:hover:not(:disabled) {
+  background: rgba(13, 148, 136, 0.2);
+  transform: translateY(-1px);
+}
+
+.step-gesture-btn.active {
+  background: #0d9488;
+  color: #ffffff;
+  border-color: #0d9488;
+  box-shadow: 0 2px 8px rgba(13, 148, 136, 0.3);
+}
+
+.step-gestures-panel {
+  margin-top: var(--spacing-md);
+  padding: var(--spacing-md);
+  background: #061111;
+  border: 1px solid rgba(76, 235, 216, 0.25);
+  border-radius: var(--radius-md);
+  box-shadow: 0 4px 16px rgba(0, 0, 0, 0.3);
+  animation: fadeIn 0.3s ease;
+}
+
+.step-gestures-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--spacing-md);
+  flex-wrap: wrap;
+  margin-bottom: var(--spacing-sm);
+  border-bottom: 1px solid rgba(76, 235, 216, 0.15);
+  padding-bottom: var(--spacing-xs);
+}
+
+.step-gestures-header .panel-title {
+  font-size: 0.875rem;
+  font-weight: 600;
+  color: #4cebd8;
+}
+
+.layer-tabs {
+  display: flex;
+  gap: 6px;
+  flex-wrap: wrap;
+}
+
+.layer-tab {
+  padding: 4px 10px;
+  font-size: 0.75rem;
+  font-weight: 600;
+  border-radius: var(--radius-sm);
+  border: 1px solid rgba(76, 235, 216, 0.2);
+  background: rgba(255, 255, 255, 0.05);
+  color: #94a3b8;
+  cursor: pointer;
+  transition: all 0.15s ease;
+}
+
+.layer-tab:hover {
+  color: #f1f5f9;
+  background: rgba(76, 235, 216, 0.15);
+}
+
+.layer-tab.active {
+  background: #0d9488;
+  color: #ffffff;
+  border-color: #4cebd8;
+  box-shadow: 0 0 10px rgba(76, 235, 216, 0.3);
+}
+
+.layer-details-banner {
+  background: rgba(13, 148, 136, 0.1);
+  border-left: 3px solid #4cebd8;
+  padding: 8px 12px;
+  border-radius: 4px;
+  margin-bottom: var(--spacing-sm);
+  font-size: 0.8125rem;
+  color: #e2e8f0;
+}
+
+.banner-title {
+  margin-bottom: 4px;
+}
+
+.spatial-direction-note {
+  margin-top: 4px;
+  color: #ffc15e;
+  font-size: 0.75rem;
+}
+
+.pedagogy-rationale-note {
+  margin-top: 4px;
+  color: #a7f3d0;
+  font-size: 0.75rem;
 }
 
 .step-hint-btn:disabled {

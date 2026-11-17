@@ -18,6 +18,7 @@ from ..schemas.umr import (
 from ..schemas.profile import StudentProfile
 from src.api.routes import expr_to_ast, _extract_equation_from_word_problem
 from src.config import settings
+from ..universal_interpreter import UniversalMathInterpreter
 
 logger = logging.getLogger("orchestrator.adapters.handwriting")
 
@@ -96,8 +97,10 @@ class HandwritingAdapter(BaseAdapter):
         clean = text_to_parse.strip()
 
         # Step 0: Detect malformed or incomplete expressions (dangling operators, e.g. "x + = 5", "3 + * 2")
+        # Do not flag degree symbol ° or question marks in geometry diagrams as dangling operators
+        is_geom_syntax = any(k in clean.lower() for k in ["°", "deg", "triangle", "angle", "radius", "circle"])
         dangling_pattern = r'([+\-*/^]\s*(=|[+\-*/^]))|([+\-*/^]\s*$)|(^\s*[*/^])'
-        if re.search(dangling_pattern, clean):
+        if not is_geom_syntax and re.search(dangling_pattern, clean):
             umr.understanding.is_ambiguous = True
             umr.understanding.clarification_question = (
                 f"Incomplete expression detected in '{text_to_parse}'. "
@@ -105,28 +108,42 @@ class HandwritingAdapter(BaseAdapter):
             )
             return umr
 
-        # Step A: Attempt direct algebraic parse
-        parsed = self.parse_string_to_ast(text_to_parse)
+        # Step 1: Universal Mathematical Interpreter (Geometry, Mensuration, Coordinate, Calculus, Stats, Arithmetic, Algebra)
+        interpreter = UniversalMathInterpreter()
+        interpretation = interpreter.interpret(text_to_parse)
 
-        # Step B: If direct parse fails and input looks like a word problem, attempt LLM extraction
-        if not parsed and len(text_to_parse.split()) > 3:
+        if interpretation.get("domain") != "unknown" and (interpretation.get("ast") or interpretation.get("geometry_problem")):
+            umr.understanding.topic = interpretation.get("topic", "general")
+            umr.understanding.problem_type = interpretation.get("problem_type", "equation")
+            umr.understanding.unknowns = interpretation.get("unknowns", ["x"])
+            umr.understanding.ast = interpretation.get("ast", {"type": "universal", "domain": interpretation.get("domain")})
+            umr.understanding.is_ambiguous = False
+            umr.understanding.clarification_question = None
+
+            if interpretation.get("latex"):
+                umr.input.recognized_latex = interpretation["latex"]
+
+            umr.understanding.mathml = f"<math xmlns='http://www.w3.org/1998/Math/MathML'><mrow><mtext>{umr.input.recognized_latex or text_to_parse}</mtext></mrow></math>"
+            umr.metadata["interpretation"] = interpretation
+            return umr
+
+        # Step 2: If direct parse fails and input looks like a word problem, attempt LLM extraction
+        if len(text_to_parse.split()) > 3:
             extracted_eq = await _extract_equation_from_word_problem(text_to_parse)
             if extracted_eq:
                 parsed = self.parse_string_to_ast(extracted_eq)
                 if parsed:
+                    umr.understanding.ast = parsed["ast"]
                     umr.input.recognized_latex = parsed["latex"]
+                    self._enrich_understanding(umr)
+                    return umr
 
-        if parsed:
-            umr.understanding.ast = parsed["ast"]
-            if not umr.input.recognized_latex:
-                umr.input.recognized_latex = parsed["latex"]
-            self._enrich_understanding(umr)
-        else:
-            umr.understanding.is_ambiguous = True
-            umr.understanding.clarification_question = (
-                f"Could not parse '{text_to_parse}' into a verified mathematical expression. "
-                "Please check for missing symbols or operators."
-            )
+        # Truly unparsable
+        umr.understanding.is_ambiguous = True
+        umr.understanding.clarification_question = (
+            f"Could not parse '{text_to_parse}' into a verified mathematical expression. "
+            "Please check for missing symbols or operators."
+        )
 
         return umr
 

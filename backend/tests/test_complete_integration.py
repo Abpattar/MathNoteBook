@@ -186,9 +186,17 @@ async def test_deaf_accessibility_isl_vocabulary():
     assert "X" in umr.accessibility.sign_language["supported_tokens"]
     assert "5" in umr.accessibility.sign_language["supported_tokens"]
     assert "10" in umr.accessibility.sign_language["supported_tokens"]
-    # '+' and '=' are not in template vocabulary, so has_warnings must be true
-    assert umr.accessibility.sign_language["has_warnings"] is True
-    assert len(umr.accessibility.sign_language["unsupported_tokens"]) > 0
+    # '+' and '=' are now fully supported with 3D landmark gesture templates
+    assert any(tok in umr.accessibility.sign_language["supported_tokens"] for tok in ["+", "PLUS"])
+    assert any(tok in umr.accessibility.sign_language["supported_tokens"] for tok in ["=", "EQUALS"])
+    assert umr.accessibility.sign_language["is_supported"] is True
+
+    # Verify unmapped arbitrary symbols honestly flag warnings via adapter
+    from src.orchestrator.adapters.sixth_sense_adapter import SixthSenseAdapter
+    isl_adapter = SixthSenseAdapter()
+    unmapped_res = isl_adapter.analyze_expression_for_isl("x + 5 = 10 §")
+    assert unmapped_res["has_warnings"] is True
+    assert "§" in unmapped_res["unsupported_tokens"]
 
 @pytest.mark.asyncio
 async def test_api_orchestrator_endpoint_full():
@@ -220,3 +228,62 @@ async def test_api_orchestrator_endpoint_full():
         assert data["accessibility"]["speech"] is not None
         assert data["accessibility"]["braille"] is not None
         assert data["accessibility"]["sonification"] is not None
+
+@pytest.mark.asyncio
+async def test_universal_geometry_triangle_angles():
+    """Test solving geometric triangle angle question: 38°; 90°; ?"""
+    orchestrator = Orchestrator.get_instance()
+    profile = StudentProfile(preferences=StudentPreferences())
+    umr = await orchestrator.process_problem(
+        raw_content="38°; 90°; ?",
+        input_type="typed",
+        profile=profile
+    )
+    assert umr.solution.status == "solved"
+    assert "52" in (umr.solution.final_answer_text or "")
+    assert len(umr.solution.steps) >= 3
+    assert umr.visualisation is not None
+    assert umr.visualisation.type in ["svg_diagram", "geometry_diagram"]
+    assert "<svg" in umr.visualisation.initial_params.get("svg_code", "")
+
+@pytest.mark.asyncio
+async def test_universal_geometry_pythagoras():
+    """Test Pythagorean theorem solver: right triangle legs 3 and 4, find hypotenuse"""
+    orchestrator = Orchestrator.get_instance()
+    profile = StudentProfile(preferences=StudentPreferences())
+    umr = await orchestrator.process_problem(
+        raw_content="right triangle legs 3 and 4, find hypotenuse",
+        input_type="typed",
+        profile=profile
+    )
+    assert umr.solution.status == "solved"
+    assert "5" in (umr.solution.final_answer_text or "")
+    assert len(umr.solution.steps) >= 3
+
+@pytest.mark.asyncio
+async def test_universal_calculus_derivative():
+    """Test calculus derivative: d/dx(x^3 + 2x^2 - 5x + 1)"""
+    orchestrator = Orchestrator.get_instance()
+    profile = StudentProfile(preferences=StudentPreferences())
+    umr = await orchestrator.process_problem(
+        raw_content="d/dx(x^3 + 2x^2 - 5x + 1)",
+        input_type="typed",
+        profile=profile
+    )
+    assert umr.solution.status == "solved"
+    assert "3 x^{2} + 4 x - 5" in (umr.solution.final_answer_text or "")
+    assert len(umr.solution.steps) >= 1
+
+@pytest.mark.asyncio
+async def test_universal_statistics_mean():
+    """Test statistics solver: mean of 5, 8, 12, 15, 20"""
+    orchestrator = Orchestrator.get_instance()
+    profile = StudentProfile(preferences=StudentPreferences())
+    umr = await orchestrator.process_problem(
+        raw_content="mean of 5, 8, 12, 15, 20",
+        input_type="typed",
+        profile=profile
+    )
+    assert umr.solution.status == "solved"
+    assert "12" in (umr.solution.final_answer_text or "")
+

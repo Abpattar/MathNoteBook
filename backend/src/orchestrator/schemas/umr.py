@@ -47,6 +47,7 @@ class SolutionStepPayload(BaseModel):
     hint: Optional[str] = None
     visual_cue: Optional[str] = None
     is_final_answer: bool = False
+    step_gestures: Optional[Dict[str, Any]] = None
 
 class SolutionPayload(BaseModel):
     status: Literal["solved", "pending", "unsupported", "error"] = "pending"

@@ -16,6 +16,9 @@ export const AccessibilityPanel: React.FC<AccessibilityPanelProps> = ({
   const [copied, setCopied] = useState(false);
   const [showISLModal, setShowISLModal] = useState(false);
   const [selectedISLSign, setSelectedISLSign] = useState<string>('');
+  const [islTab, setIslTab] = useState<'problem' | 'steps'>('steps');
+  const [activeStepIndex, setActiveStepIndex] = useState<number>(0);
+  const [activeStepLayer, setActiveStepLayer] = useState<'layer_1_state' | 'layer_2_action' | 'layer_3_pedagogy'>('layer_1_state');
 
   if (!accessibility) {
     return null;
@@ -175,38 +178,159 @@ export const AccessibilityPanel: React.FC<AccessibilityPanelProps> = ({
       {showISLModal && sign_language && (
         <div className="isl-drawer">
           <div className="isl-drawer-header">
-            <h5>Indian Sign Language Interaction (Sixth-Sense Model)</h5>
-            <span className="isl-dialect-badge">ISL Standard</span>
+            <div>
+              <h5>Indian Sign Language Interaction (Sixth-Sense Model)</h5>
+              <span className="isl-dialect-badge">ISL Standard</span>
+            </div>
+
+            {sign_language.step_gestures && sign_language.step_gestures.length > 0 && (
+              <div className="isl-mode-tabs">
+                <button
+                  type="button"
+                  className={`isl-mode-tab ${islTab === 'steps' ? 'active' : ''}`}
+                  onClick={() => setIslTab('steps')}
+                >
+                  🪜 Solution Steps ({sign_language.step_gestures.length})
+                </button>
+                <button
+                  type="button"
+                  className={`isl-mode-tab ${islTab === 'problem' ? 'active' : ''}`}
+                  onClick={() => setIslTab('problem')}
+                >
+                  📝 Problem Equation
+                </button>
+              </div>
+            )}
           </div>
 
-          {/* Sequential Sign Breakdown */}
-          {sign_language.sign_sequence && sign_language.sign_sequence.length > 0 && (
-            <div className="isl-sequence-section">
-              <span className="isl-section-title">Sign Language Sequence:</span>
-              <div className="isl-sequence-chips">
-                {sign_language.sign_sequence.map((item, idx) => (
-                  <div
-                    key={`${item.sign}-${idx}`}
-                    className={`isl-chip ${item.has_3d_template ? 'template-ready' : 'gloss-ready'} ${item.sign === selectedISLSign ? 'selected' : ''}`}
-                    title={item.description}
-                    onClick={() => setSelectedISLSign(item.sign)}
-                    style={{ cursor: 'pointer' }}
-                  >
-                    <span className="chip-sign">{item.sign}</span>
-                    <span className="chip-desc">{item.has_3d_template ? '🖐️ 3D Sign' : '📐 Math Gloss'}</span>
-                  </div>
-                ))}
+          {islTab === 'steps' && sign_language.step_gestures && sign_language.step_gestures.length > 0 ? (
+            <div className="isl-step-gestures-view">
+              {/* Step Navigation Bar */}
+              <div className="isl-step-selector">
+                <span className="selector-label">Select Solution Step:</span>
+                <div className="step-chips">
+                  {sign_language.step_gestures.map((sg, idx) => (
+                    <button
+                      key={`step-${sg.step_number}`}
+                      type="button"
+                      className={`step-select-chip ${activeStepIndex === idx ? 'active' : ''}`}
+                      onClick={() => {
+                        setActiveStepIndex(idx);
+                        setSelectedISLSign('');
+                      }}
+                    >
+                      Step {sg.step_number}
+                    </button>
+                  ))}
+                </div>
               </div>
-            </div>
-          )}
 
-          {/* Interactive 3D Skeleton Gesture Player */}
-          {sign_language.sign_sequence && sign_language.sign_sequence.length > 0 && (
-            <ISLSkeletonViewer
-              signSequence={sign_language.sign_sequence}
-              activeSign={selectedISLSign}
-              onSelectSign={setSelectedISLSign}
-            />
+              {/* Step Info Banner & Layer Tabs */}
+              {(() => {
+                const currentStepData = sign_language.step_gestures[activeStepIndex] || sign_language.step_gestures[0];
+                const layerData = currentStepData.layers?.[activeStepLayer] || {
+                  title: 'Layer 1: Mathematical State',
+                  description: currentStepData.explanation,
+                  tokens: currentStepData.sign_sequence
+                };
+
+                return (
+                  <div className="step-layer-container">
+                    <div className="step-math-preview">
+                      <span className="step-math-label">Step {currentStepData.step_number} Equation:</span>
+                      <code>{currentStepData.latex}</code>
+                    </div>
+
+                    <div className="isl-layer-tabs">
+                      <button
+                        type="button"
+                        className={`isl-layer-tab ${activeStepLayer === 'layer_1_state' ? 'active' : ''}`}
+                        onClick={() => {
+                          setActiveStepLayer('layer_1_state');
+                          setSelectedISLSign('');
+                        }}
+                      >
+                        1️⃣ Equation State
+                      </button>
+                      <button
+                        type="button"
+                        className={`isl-layer-tab ${activeStepLayer === 'layer_2_action' ? 'active' : ''}`}
+                        onClick={() => {
+                          setActiveStepLayer('layer_2_action');
+                          setSelectedISLSign('');
+                        }}
+                      >
+                        2️⃣ Action Sign
+                      </button>
+                      <button
+                        type="button"
+                        className={`isl-layer-tab ${activeStepLayer === 'layer_3_pedagogy' ? 'active' : ''}`}
+                        onClick={() => {
+                          setActiveStepLayer('layer_3_pedagogy');
+                          setSelectedISLSign('');
+                        }}
+                      >
+                        3️⃣ Pedagogy Rationale
+                      </button>
+                    </div>
+
+                    <div className="isl-layer-info-card">
+                      <div className="layer-title-row">
+                        <strong>{layerData.title}</strong>
+                        <span className="layer-desc">{layerData.description}</span>
+                      </div>
+                      {layerData.spatial_direction && (
+                        <div className="isl-spatial-cue">
+                          🧭 <strong>Spatial Sign Cue:</strong> {layerData.spatial_direction}
+                        </div>
+                      )}
+                      {layerData.rationale_text && (
+                        <div className="isl-rationale-note">
+                          💡 <strong>Educational Principle:</strong> {layerData.rationale_text}
+                        </div>
+                      )}
+                    </div>
+
+                    <ISLSkeletonViewer
+                      signSequence={layerData.tokens || []}
+                      activeSign={selectedISLSign}
+                      onSelectSign={setSelectedISLSign}
+                    />
+                  </div>
+                );
+              })()}
+            </div>
+          ) : (
+            /* Problem Equation View */
+            <div className="isl-problem-view">
+              {sign_language.sign_sequence && sign_language.sign_sequence.length > 0 && (
+                <div className="isl-sequence-section">
+                  <span className="isl-section-title">Sign Language Sequence:</span>
+                  <div className="isl-sequence-chips">
+                    {sign_language.sign_sequence.map((item, idx) => (
+                      <div
+                        key={`${item.sign}-${idx}`}
+                        className={`isl-chip ${item.has_3d_template ? 'template-ready' : 'gloss-ready'} ${item.sign === selectedISLSign ? 'selected' : ''}`}
+                        title={item.description}
+                        onClick={() => setSelectedISLSign(item.sign)}
+                        style={{ cursor: 'pointer' }}
+                      >
+                        <span className="chip-sign">{item.display || item.sign}</span>
+                        <span className="chip-desc">{item.has_3d_template ? '🖐️ 3D Sign' : '📐 Math Gloss'}</span>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              )}
+
+              {sign_language.sign_sequence && sign_language.sign_sequence.length > 0 && (
+                <ISLSkeletonViewer
+                  signSequence={sign_language.sign_sequence}
+                  activeSign={selectedISLSign}
+                  onSelectSign={setSelectedISLSign}
+                />
+              )}
+            </div>
           )}
 
           {sign_language.unsupported_tokens.length > 0 ? (
@@ -215,7 +339,7 @@ export const AccessibilityPanel: React.FC<AccessibilityPanelProps> = ({
             </div>
           ) : (
             <div className="isl-success-note">
-              ✓ All tokens in this equation are mapped to supported ISL signs and educational math glosses.
+              ✓ All mathematical signs (+, -, *, /, =, ^, √) and tokens are mapped to full 3D skeleton gestures.
             </div>
           )}
 

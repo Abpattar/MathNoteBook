@@ -56,9 +56,12 @@ class MathCATAdapter(BaseAdapter):
         # Handle square roots: \sqrt{x}
         s = re.sub(r'\\sqrt\{([^}]+)\}', r'the square root of \1', s)
 
-        # Handle powers: x^2 -> x squared, x^3 -> x cubed, x^n -> x to the n-th power
-        s = re.sub(r'([a-zA-Z0-9])\^2\b', r'\1 squared', s)
-        s = re.sub(r'([a-zA-Z0-9])\^3\b', r'\1 cubed', s)
+        # Handle degree symbol: ^\circ or ° -> degrees
+        s = re.sub(r'\^?\\circ|°', r' degrees', s)
+
+        # Handle powers: x^2 or x^{2} -> x squared, x^3 or x^{3} -> x cubed, x^n -> x to the n-th power
+        s = re.sub(r'([a-zA-Z0-9])\^\{?2\}?', r'\1 squared', s)
+        s = re.sub(r'([a-zA-Z0-9])\^\{?3\}?', r'\1 cubed', s)
         s = re.sub(r'([a-zA-Z0-9])\^\{?([a-zA-Z0-9]+)\}?', r'\1 to the power of \2', s)
 
         # Handle parenthesized expressions: (x + 2) -> the quantity x plus 2

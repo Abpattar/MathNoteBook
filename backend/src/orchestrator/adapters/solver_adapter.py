@@ -72,6 +72,43 @@ class SolverAdapter(BaseAdapter):
         umr: UnifiedMathematicalRepresentation,
         profile: StudentProfile
     ) -> UnifiedMathematicalRepresentation:
+        interpretation = umr.metadata.get("interpretation")
+        domain = interpretation.get("domain") if interpretation else None
+        grade = profile.grade
+
+        # Handle non-algebra domains (Geometry, Mensuration, Coordinate, Calculus, Statistics, Probability, Arithmetic)
+        if domain and domain in ("geometry", "mensuration", "coordinate_geometry", "calculus", "statistics", "probability", "arithmetic"):
+            try:
+                from ..universal_solver import UniversalSolver
+                solver = UniversalSolver()
+                res = solver.solve(interpretation, grade=grade)
+
+                umr.solution = SolutionPayload(
+                    status="solved",
+                    verified=True,
+                    steps=res["steps"],
+                    final_answer_text=res["final_answer"]
+                )
+
+                if res.get("svg_diagram"):
+                    umr.visualisation.type = "svg_diagram"
+                    umr.visualisation.component_id = "GeometryDiagramVisualizer"
+                    umr.visualisation.initial_params = {
+                        "svg_code": res["svg_diagram"],
+                        "topic": interpretation.get("topic"),
+                        "domain": domain
+                    }
+                    umr.visualisation.description = f"Interactive visual diagram for {interpretation.get('topic')}"
+                return umr
+            except Exception as e:
+                logger.error(f"Universal solver error: {e}", exc_info=True)
+                umr.solution = SolutionPayload(
+                    status="error",
+                    verified=False,
+                    error_message=f"Mathematical solver error: {str(e)}"
+                )
+                return umr
+
         if not umr.understanding.ast:
             umr.solution = SolutionPayload(
                 status="error",

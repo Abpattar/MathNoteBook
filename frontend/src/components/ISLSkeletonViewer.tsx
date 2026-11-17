@@ -63,6 +63,69 @@ export const ISLSkeletonViewer: React.FC<ISLSkeletonViewerProps> = ({
   const [speed, setSpeed] = useState<number>(1.0);
   const animationTimerRef = useRef<number | null>(null);
 
+  // Helper to resolve 3D take by sign, uppercase, or display
+  const getTake = useCallback((signStr: string): SignTake | null => {
+    if (!references || !signStr) return null;
+    if (references[signStr] && references[signStr].length > 0) return references[signStr][0];
+    const upper = signStr.toUpperCase();
+    if (references[upper] && references[upper].length > 0) return references[upper][0];
+    const item = signSequence.find(s => s.sign === signStr || s.display === signStr);
+    if (item) {
+      if (references[item.sign] && references[item.sign].length > 0) return references[item.sign][0];
+      if (references[item.display] && references[item.display].length > 0) return references[item.display][0];
+      const itemUpper = item.sign.toUpperCase();
+      if (references[itemUpper] && references[itemUpper].length > 0) return references[itemUpper][0];
+    }
+    // Mathematical symbol aliases
+    const mathAliases: Record<string, string[]> = {
+      '+': ['PLUS', '+'],
+      'PLUS': ['+', 'PLUS'],
+      '-': ['MINUS', '-'],
+      'MINUS': ['-', 'MINUS'],
+      '*': ['TIMES', '*'],
+      'TIMES': ['*', 'TIMES'],
+      '/': ['DIVIDE', '/'],
+      'DIVIDE': ['/', 'DIVIDE'],
+      '=': ['EQUALS', '='],
+      'EQUALS': ['=', 'EQUALS'],
+      '^2': ['SQUARED', '^2'],
+      'SQUARED': ['^2', 'SQUARED'],
+      '^3': ['CUBED', '^3'],
+      'CUBED': ['^3', 'CUBED'],
+      '^': ['POWER', '^'],
+      'POWER': ['^', 'POWER'],
+      '√': ['SQRT', '√', '\\sqrt'],
+      'SQRT': ['√', 'SQRT', '\\sqrt'],
+      '<=': ['LESS_EQUAL', '<=', '≤'],
+      '>=': ['GREATER_EQUAL', '>=', '≥'],
+      '<': ['LESS_THAN', '<'],
+      '>': ['GREATER_THAN', '>'],
+      '±': ['PLUS_MINUS', '±', '+-'],
+      'PLUS_MINUS': ['±', 'PLUS_MINUS', '+-'],
+      'π': ['PI', 'π', '\\pi'],
+      'PI': ['π', 'PI', '\\pi'],
+      '°': ['DEGREES', '°', 'DEG'],
+      'DEGREES': ['°', 'DEGREES', 'DEG'],
+      '%': ['PERCENT', '%'],
+      'PERCENT': ['%', 'PERCENT'],
+      '?': ['QUESTION', '?'],
+      'QUESTION': ['?', 'QUESTION'],
+      'OR': ['OR', 'or'],
+      'or': ['OR', 'or']
+    };
+    if (mathAliases[signStr]) {
+      for (const alias of mathAliases[signStr]) {
+        if (references[alias] && references[alias].length > 0) return references[alias][0];
+      }
+    }
+    if (mathAliases[upper]) {
+      for (const alias of mathAliases[upper]) {
+        if (references[alias] && references[alias].length > 0) return references[alias][0];
+      }
+    }
+    return null;
+  }, [references, signSequence]);
+
   // Load preset-references.json
   useEffect(() => {
     let isMounted = true;
@@ -75,7 +138,7 @@ export const ISLSkeletonViewer: React.FC<ISLSkeletonViewerProps> = ({
           setReferences(data);
           setIsLoading(false);
           // Set first available 3D sign
-          const first3D = signSequence.find(s => s.has_3d_template && data[s.sign]);
+          const first3D = signSequence.find(s => s.has_3d_template && (data[s.sign] || data[s.sign.toUpperCase()] || data[s.display]));
           if (first3D && !currentSign) {
             setCurrentSign(first3D.sign);
           }
@@ -95,6 +158,20 @@ export const ISLSkeletonViewer: React.FC<ISLSkeletonViewerProps> = ({
       setCurrentSign(propActiveSign);
     }
   }, [propActiveSign]);
+
+  // When signSequence changes, ensure currentSign belongs to it
+  useEffect(() => {
+    if (signSequence && signSequence.length > 0) {
+      const match = signSequence.some(s => s.sign === currentSign || s.display === currentSign);
+      if (!match) {
+        const first3D = signSequence.find(s => s.has_3d_template && getTake(s.sign) !== null);
+        const defaultSign = first3D?.sign || signSequence[0]?.sign || '';
+        if (defaultSign) {
+          setCurrentSign(defaultSign);
+        }
+      }
+    }
+  }, [signSequence, currentSign, getTake]);
 
   const drawFrame = useCallback((frame: LandmarkFrame, meta: { left: boolean; right: boolean; face: boolean }) => {
     const canvas = canvasRef.current;
@@ -173,7 +250,8 @@ export const ISLSkeletonViewer: React.FC<ISLSkeletonViewerProps> = ({
 
   // Play animation for current sign
   const playCurrentSign = useCallback(() => {
-    if (!references || !currentSign || !references[currentSign] || references[currentSign].length === 0) {
+    const take = getTake(currentSign);
+    if (!take || !take.frames || take.frames.length === 0) {
       return;
     }
 
@@ -182,10 +260,7 @@ export const ISLSkeletonViewer: React.FC<ISLSkeletonViewerProps> = ({
       animationTimerRef.current = null;
     }
 
-    const take = references[currentSign][0];
     const frames = take.frames;
-    if (!frames || frames.length === 0) return;
-
     setIsPlaying(true);
     let frameIdx = 0;
     const intervalMs = Math.max(25, Math.floor(60 / speed));
@@ -205,11 +280,12 @@ export const ISLSkeletonViewer: React.FC<ISLSkeletonViewerProps> = ({
       drawFrame(frames[frameIdx], take.meta);
       frameIdx++;
     }, intervalMs);
-  }, [references, currentSign, speed, drawFrame]);
+  }, [getTake, currentSign, speed, drawFrame]);
 
   // Initial render when sign changes
   useEffect(() => {
-    if (!references || !currentSign || !references[currentSign] || references[currentSign].length === 0) {
+    const take = getTake(currentSign);
+    if (!take || !take.frames || take.frames.length === 0) {
       const canvas = canvasRef.current;
       if (canvas) {
         const ctx = canvas.getContext('2d');
@@ -225,11 +301,8 @@ export const ISLSkeletonViewer: React.FC<ISLSkeletonViewerProps> = ({
       return;
     }
 
-    const take = references[currentSign][0];
-    if (take.frames && take.frames.length > 0) {
-      drawFrame(take.frames[0], take.meta);
-    }
-  }, [references, currentSign, drawFrame]);
+    drawFrame(take.frames[0], take.meta);
+  }, [getTake, currentSign, drawFrame]);
 
   // Play full sequence through signs
   const playFullSequence = async () => {
@@ -237,13 +310,14 @@ export const ISLSkeletonViewer: React.FC<ISLSkeletonViewerProps> = ({
     setIsPlaying(true);
 
     const playableSigns = signSequence
-      .filter(item => item.has_3d_template && references[item.sign] && references[item.sign].length > 0)
+      .filter(item => item.has_3d_template && getTake(item.sign) !== null)
       .map(item => item.sign);
 
     for (const sign of playableSigns) {
       setCurrentSign(sign);
       onSelectSign?.(sign);
-      const take = references[sign][0];
+      const take = getTake(sign);
+      if (!take || !take.frames || take.frames.length === 0) continue;
       const frames = take.frames;
 
       await new Promise<void>((resolve) => {
@@ -277,7 +351,8 @@ export const ISLSkeletonViewer: React.FC<ISLSkeletonViewerProps> = ({
     }
   };
 
-  const currentItem = signSequence.find(s => s.sign === currentSign);
+  const currentItem = signSequence.find(s => s.sign === currentSign || s.display === currentSign);
+  const currentHasTake = getTake(currentSign) !== null;
 
   return (
     <div className="isl-skeleton-viewer">
@@ -293,7 +368,7 @@ export const ISLSkeletonViewer: React.FC<ISLSkeletonViewerProps> = ({
           <button
             className="skeleton-btn primary"
             onClick={playCurrentSign}
-            disabled={isPlaying || !references?.[currentSign]}
+            disabled={isPlaying || !currentHasTake}
             title="Replay this sign's 3D gesture"
           >
             {isPlaying ? '⏳ Playing...' : '▶ Replay Gesture'}
@@ -340,17 +415,20 @@ export const ISLSkeletonViewer: React.FC<ISLSkeletonViewerProps> = ({
       <div className="skeleton-sequence-strip">
         <span className="strip-label">Click a token to animate:</span>
         <div className="strip-chips">
-          {signSequence.map((item, idx) => (
-            <button
-              key={`${item.sign}-${idx}`}
-              className={`strip-chip ${item.sign === currentSign ? 'active' : ''} ${item.has_3d_template ? 'template' : 'gloss'}`}
-              onClick={() => handleSelectToken(item.sign)}
-              title={item.description}
-            >
-              <span className="chip-char">{item.sign}</span>
-              <span className="chip-tag">{item.has_3d_template ? '3D' : 'Gloss'}</span>
-            </button>
-          ))}
+          {signSequence.map((item, idx) => {
+            const hasTake = getTake(item.sign) !== null;
+            return (
+              <button
+                key={`${item.sign}-${idx}`}
+                className={`strip-chip ${item.sign === currentSign || item.display === currentSign ? 'active' : ''} ${hasTake ? 'template' : 'gloss'}`}
+                onClick={() => handleSelectToken(item.sign)}
+                title={item.description}
+              >
+                <span className="chip-char">{item.display || item.sign}</span>
+                <span className="chip-tag">{hasTake ? '3D' : 'Gloss'}</span>
+              </button>
+            );
+          })}
         </div>
       </div>
     </div>
