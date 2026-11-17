@@ -25,6 +25,9 @@ class Orchestrator:
             cls._instance = cls()
         return cls._instance
 
+    async def initialize_all(self) -> None:
+        await self.workflow_manager.registry.initialize_all()
+
     async def process_problem(
         self,
         raw_content: str,

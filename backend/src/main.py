@@ -13,6 +13,14 @@ except ImportError:
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     print(f"Starting AI Math Notebook Backend on {settings.host}:{settings.port}")
+    try:
+        try:
+            from src.orchestrator.orchestrator import Orchestrator
+        except ImportError:
+            from orchestrator.orchestrator import Orchestrator
+        await Orchestrator.get_instance().initialize_all()
+    except Exception as e:
+        print(f"Warning: Orchestrator pre-initialization notice: {e}")
     yield
     print("Shutting down...")
 

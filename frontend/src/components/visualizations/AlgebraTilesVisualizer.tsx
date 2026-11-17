@@ -234,3 +234,4 @@ export const AlgebraTilesVisualizer: React.FC<AlgebraTilesVisualizerProps> = ({
     </div>
   );
 };
+

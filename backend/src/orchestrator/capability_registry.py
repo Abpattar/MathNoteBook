@@ -42,6 +42,13 @@ class CapabilityRegistry:
     def list_capabilities(self) -> Dict[str, CapabilityMetadata]:
         return dict(self._metadata)
 
+    async def initialize_all(self) -> None:
+        for name, adapter in self._adapters.items():
+            try:
+                await adapter.initialize()
+            except Exception as e:
+                logger.error(f"Error initializing adapter '{name}': {e}")
+
     def health_report(self) -> Dict[str, Any]:
         report = {}
         for name, adapter in self._adapters.items():
