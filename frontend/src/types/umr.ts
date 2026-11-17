@@ -173,6 +173,7 @@ export interface UnifiedMathematicalRepresentation {
     mathml?: string;
     is_ambiguous: boolean;
     clarification_question?: string;
+    clarification_options?: string[];
   };
   learning: LearningPayload;
   solution: SolutionPayload;

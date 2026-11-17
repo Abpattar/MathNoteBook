@@ -41,6 +41,8 @@ export function MathCanvas({
   const ctxRef = useRef<CanvasRenderingContext2D | null>(null);
   const [containerSize, setContainerSize] = useState({ width: 0, height: 0 });
   const [isDrawing, setIsDrawing] = useState(false);
+  const [isShapeMenuOpen, setIsShapeMenuOpen] = useState(false);
+  const shapeMenuRef = useRef<HTMLDivElement>(null);
   const currentStrokeRef = useRef<{ x: number; y: number; pressure?: number; timestamp: number }[]>([]);
   const strokeIdRef = useRef(0);
 
@@ -142,14 +144,15 @@ export function MathCanvas({
       canvas.style.height = `${height}px`;
 
       ctx.scale(scale, scale);
-      setContainerSize({ width, height });
-      redraw();
+      setContainerSize(prev => (prev.width === width && prev.height === height ? prev : { width, height }));
+      redraw(width, height);
     };
 
-    const redraw = () => {
+    const redraw = (w?: number, h?: number) => {
       if (!ctxRef.current) return;
       const ctx = ctxRef.current;
-      const { width, height } = containerSize;
+      const width = w ?? (canvas ? canvas.width / (window.devicePixelRatio || 1) : 600);
+      const height = h ?? (canvas ? canvas.height / (window.devicePixelRatio || 1) : 400);
 
       ctx.clearRect(0, 0, width, height);
       ctx.fillStyle = '#fefefe';
@@ -176,7 +179,7 @@ export function MathCanvas({
     resize();
     window.addEventListener('resize', resize);
     return () => window.removeEventListener('resize', resize);
-  }, [strokes, containerSize]);
+  }, [strokes]);
 
   const getCanvasPoint = useCallback((event: React.PointerEvent | PointerEvent) => {
     const canvas = canvasRef.current;
@@ -290,6 +293,135 @@ export function MathCanvas({
   }, [disabled, onUndo, onRedo]);
 
   useEffect(() => {
+    const handleClickOutside = (e: MouseEvent) => {
+      if (shapeMenuRef.current && !shapeMenuRef.current.contains(e.target as Node)) {
+        setIsShapeMenuOpen(false);
+      }
+    };
+    if (isShapeMenuOpen) {
+      document.addEventListener('pointerdown', handleClickOutside);
+      return () => document.removeEventListener('pointerdown', handleClickOutside);
+    }
+  }, [isShapeMenuOpen]);
+
+  const insertShape = useCallback((type: 'right_triangle' | 'triangle' | 'square' | 'rectangle' | 'circle') => {
+    setIsShapeMenuOpen(false);
+    const canvas = canvasRef.current;
+    const cw = containerSize.width || (canvas ? canvas.width / (window.devicePixelRatio || 1) : 600);
+    const ch = containerSize.height || (canvas ? canvas.height / (window.devicePixelRatio || 1) : 400);
+    const cx = Math.round(cw / 2);
+    const cy = Math.round(ch / 2);
+    const now = Date.now();
+
+    const newStrokes: Stroke[] = [];
+
+    if (type === 'right_triangle') {
+      const x0 = cx - 90, y0 = cy + 60;
+      const x1 = cx + 90, y1 = cy + 60;
+      const x2 = cx - 90, y2 = cy - 65;
+      newStrokes.push({
+        id: `stroke-shape-${now}-1`,
+        points: [
+          { x: x0, y: y0, timestamp: now },
+          { x: x1, y: y1, timestamp: now + 5 },
+          { x: x2, y: y2, timestamp: now + 10 },
+          { x: x0, y: y0, timestamp: now + 15 },
+        ],
+        tool: 'pen',
+        color: penColor,
+        width: penWidth,
+        timestamp: now
+      });
+      const sq = 18;
+      newStrokes.push({
+        id: `stroke-shape-${now}-2`,
+        points: [
+          { x: x0, y: y0 - sq, timestamp: now + 20 },
+          { x: x0 + sq, y: y0 - sq, timestamp: now + 25 },
+          { x: x0 + sq, y: y0, timestamp: now + 30 },
+        ],
+        tool: 'pen',
+        color: penColor,
+        width: penWidth,
+        timestamp: now + 20
+      });
+    } else if (type === 'triangle') {
+      const topX = cx, topY = cy - 70;
+      const brX = cx + 85, brY = cy + 70;
+      const blX = cx - 85, blY = cy + 70;
+      newStrokes.push({
+        id: `stroke-shape-${now}-1`,
+        points: [
+          { x: topX, y: topY, timestamp: now },
+          { x: brX, y: brY, timestamp: now + 5 },
+          { x: blX, y: blY, timestamp: now + 10 },
+          { x: topX, y: topY, timestamp: now + 15 },
+        ],
+        tool: 'pen',
+        color: penColor,
+        width: penWidth,
+        timestamp: now
+      });
+    } else if (type === 'square') {
+      const s = 130;
+      const half = s / 2;
+      newStrokes.push({
+        id: `stroke-shape-${now}-1`,
+        points: [
+          { x: cx - half, y: cy - half, timestamp: now },
+          { x: cx + half, y: cy - half, timestamp: now + 5 },
+          { x: cx + half, y: cy + half, timestamp: now + 10 },
+          { x: cx - half, y: cy + half, timestamp: now + 15 },
+          { x: cx - half, y: cy - half, timestamp: now + 20 },
+        ],
+        tool: 'pen',
+        color: penColor,
+        width: penWidth,
+        timestamp: now
+      });
+    } else if (type === 'rectangle') {
+      const hw = 95, hh = 55;
+      newStrokes.push({
+        id: `stroke-shape-${now}-1`,
+        points: [
+          { x: cx - hw, y: cy - hh, timestamp: now },
+          { x: cx + hw, y: cy - hh, timestamp: now + 5 },
+          { x: cx + hw, y: cy + hh, timestamp: now + 10 },
+          { x: cx - hw, y: cy + hh, timestamp: now + 15 },
+          { x: cx - hw, y: cy - hh, timestamp: now + 20 },
+        ],
+        tool: 'pen',
+        color: penColor,
+        width: penWidth,
+        timestamp: now
+      });
+    } else if (type === 'circle') {
+      const r = 70;
+      const count = 48;
+      const pts = [];
+      for (let i = 0; i <= count; i++) {
+        const a = (i * 2 * Math.PI) / count;
+        pts.push({
+          x: Math.round(cx + r * Math.cos(a)),
+          y: Math.round(cy + r * Math.sin(a)),
+          timestamp: now + i * 2
+        });
+      }
+      newStrokes.push({
+        id: `stroke-shape-${now}-1`,
+        points: pts,
+        tool: 'pen',
+        color: penColor,
+        width: penWidth,
+        timestamp: now
+      });
+    }
+
+    onStrokesChange([...strokes, ...newStrokes]);
+    onToolChange('pen');
+  }, [containerSize, penColor, penWidth, strokes, onStrokesChange, onToolChange]);
+
+  useEffect(() => {
     window.addEventListener('keydown', handleKeyDown);
     return () => window.removeEventListener('keydown', handleKeyDown);
   }, [handleKeyDown]);
@@ -334,6 +466,73 @@ export function MathCanvas({
             <path d="M10 15 6 19" />
           </svg>
         </button>
+        <div className="toolbar-divider" role="separator" />
+        <div className="shape-picker-container" ref={shapeMenuRef}>
+          <button
+            type="button"
+            className={`toolbar-btn shape-dropdown-btn ${isShapeMenuOpen ? 'active' : ''}`}
+            onClick={() => setIsShapeMenuOpen(prev => !prev)}
+            disabled={disabled}
+            title="Insert Default Shape"
+            aria-label="Insert default geometric shape"
+            aria-haspopup="true"
+            aria-expanded={isShapeMenuOpen}
+          >
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+              <polygon points="12 3 2 21 22 21" />
+            </svg>
+            <span className="shape-btn-text">Shapes ▾</span>
+          </button>
+          {isShapeMenuOpen && (
+            <div className="shape-dropdown-menu" role="menu" aria-label="Available geometric shapes">
+              <button
+                type="button"
+                className="shape-menu-item"
+                role="menuitem"
+                onClick={() => insertShape('right_triangle')}
+              >
+                <span className="shape-menu-icon">📐</span>
+                <span className="shape-menu-text">Right Triangle (90°)</span>
+              </button>
+              <button
+                type="button"
+                className="shape-menu-item"
+                role="menuitem"
+                onClick={() => insertShape('triangle')}
+              >
+                <span className="shape-menu-icon">🔺</span>
+                <span className="shape-menu-text">Triangle</span>
+              </button>
+              <button
+                type="button"
+                className="shape-menu-item"
+                role="menuitem"
+                onClick={() => insertShape('square')}
+              >
+                <span className="shape-menu-icon">⬛</span>
+                <span className="shape-menu-text">Square</span>
+              </button>
+              <button
+                type="button"
+                className="shape-menu-item"
+                role="menuitem"
+                onClick={() => insertShape('rectangle')}
+              >
+                <span className="shape-menu-icon">▭</span>
+                <span className="shape-menu-text">Rectangle</span>
+              </button>
+              <button
+                type="button"
+                className="shape-menu-item"
+                role="menuitem"
+                onClick={() => insertShape('circle')}
+              >
+                <span className="shape-menu-icon">⭕</span>
+                <span className="shape-menu-text">Circle</span>
+              </button>
+            </div>
+          )}
+        </div>
         <div className="toolbar-divider" role="separator" />
         <button
           className="toolbar-btn"

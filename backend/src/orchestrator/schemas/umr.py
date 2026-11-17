@@ -21,6 +21,7 @@ class UnderstandingPayload(BaseModel):
     mathml: Optional[str] = None
     is_ambiguous: bool = False
     clarification_question: Optional[str] = None
+    clarification_options: List[str] = Field(default_factory=list)
 
 class PrerequisiteConcept(BaseModel):
     id: str

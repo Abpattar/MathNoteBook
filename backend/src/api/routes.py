@@ -232,17 +232,22 @@ async def recognize_handwriting(request: RecognizeRequest):
                         {
                             "type": "text",
                             "text": (
-                                "You are an expert mathematical and geometric drawing OCR reader. Look at the handwritten drawing or problem on the screen.\n"
-                                "1. If it is an algebraic or arithmetic equation/expression, transcribe the math accurately into plain text (e.g. 'x^2 + 5x + 6 = 0' or 'x + y = 10; y = 2').\n"
-                                "2. If it is a geometric diagram (e.g. triangle, right triangle, rectangle, circle, polygon, angles):\n"
-                                "   - Identify the shape and all labeled angles (including right-angle symbols as 90°), side lengths, and target unknown ('?' or 'x').\n"
-                                "   - Formulate as a concise geometric problem statement, e.g.:\n"
+                                "You are an expert mathematical, handwriting, and geometric drawing OCR reader. Look at the canvas drawing.\n"
+                                "1. Read all handwritten text, labels, annotations, or questions written in or around the drawing space (e.g. 'Area', 'shortest length', 'longest side', 'perimeter', 'hypotenuse', 'diagonal', 'find x', 'height', 'base', 'radius').\n"
+                                "2. If it is an algebraic or arithmetic equation/expression, transcribe the math accurately into plain text (e.g. 'x^2 + 5x + 6 = 0' or '2x + 4 = 10').\n"
+                                "3. If it is a geometric diagram (triangle, right triangle, square, rectangle, circle, polygon, angles):\n"
+                                "   - Identify the shape and all labeled side lengths, angles (including 90° right angles), radius, or variables.\n"
+                                "   - Read any words or questions written in the drawing space (e.g. 'Area', 'shortest length', 'perimeter', 'find hypotenuse', 'diagonal') and incorporate them into the problem statement.\n"
+                                "   - Formulate as a clean, concise problem statement, for example:\n"
+                                "     'Right triangle with legs 3 and 4, find Area'\n"
+                                "     'Triangle with sides 3, 4, 5, find shortest length'\n"
+                                "     'Triangle with sides 3, 4, 5, find Area'\n"
                                 "     'Right triangle with angles 38°, 90°, find ?'\n"
-                                "     'Right triangle with legs 3 and 4, find hypotenuse'\n"
-                                "     'Circle with radius 5, find area'\n"
-                                "     'Rectangle with length 8 and width 5, find perimeter'\n"
-                                "   - Even if you see fragmented labels like '38°; 90°; ?', identify the diagram and write: 'Right triangle with angles 38°, 90°, find ?'.\n"
-                                "3. Output ONLY the transcribed math or geometric problem, without markdown, quotes, backticks or commentary."
+                                "     'Rectangle with length 8 and width 5, find Area'\n"
+                                "     'Square with side 6, find Area'\n"
+                                "     'Circle with radius 5, find circumference'\n"
+                                "   - If the student drew a shape with measurements but wrote NO question or target (e.g. just a right triangle with 3 and 4, or triangle with sides 3, 4, 5), transcribe the shape and measurements faithfully (e.g. 'Right triangle with legs 3 and 4' or 'Triangle with sides 3, 4, 5' or 'Rectangle with length 8 and width 5').\n"
+                                "4. Output ONLY the transcribed problem text, with no markdown code blocks, quotes, or commentary."
                             )
                         },
                         {"type": "image_url", "image_url": {"url": img_data}}
@@ -448,16 +453,60 @@ async def recognize_typed(request: RecognizeTypedRequest):
             instruction=instruction
         )
     
+    # Third attempt: Universal Math Interpreter for geometry, mensuration, or pedagogical clarification
+    from src.orchestrator.universal_interpreter import UniversalMathInterpreter
+    interpreter = UniversalMathInterpreter()
+    interp = interpreter.interpret(text)
+
+    if interp.get("is_ambiguous"):
+        options = [
+            {"label": opt, "value": opt}
+            for opt in interp.get("clarification_options", [])
+        ]
+        return RecognitionResult(
+            candidates=[],
+            needs_clarification=True,
+            clarification=ClarificationRequest(
+                id=str(uuid.uuid4())[:8],
+                question=interp.get("clarification_question") or f"What would you like to calculate for '{text}'?",
+                options=options,
+                affected_region={"x": 0, "y": 0, "w": 0, "h": 0},
+                symbol_in_question=text[:50]
+            ),
+            recognized_text=text
+        )
+
+    if interp.get("domain") != "unknown" and (interp.get("ast") or interp.get("geometry_problem") or interp.get("mensuration_problem")):
+        candidate = RecognitionCandidate(
+            latex=interp.get("latex", text),
+            ast_json=interp.get("ast") or {"type": "universal", "domain": interp.get("domain")},
+            confidence=0.95,
+            bbox={"x": 0, "y": 0, "w": 100, "h": 100},
+            symbol_confidences=[]
+        )
+        return RecognitionResult(
+            candidates=[candidate],
+            needs_clarification=False,
+            recognized_text=text,
+            instruction=instruction
+        )
+    
+    # Pedagogical clarification options when completely ambiguous
     return RecognitionResult(
         candidates=[],
         needs_clarification=True,
         clarification=ClarificationRequest(
             id=str(uuid.uuid4())[:8],
-            question="Could not parse the expression. Please check your input.",
-            options=[],
+            question=f"I couldn't quite determine the exact math goal for '{text}'. What would you like to do?",
+            options=[
+                {"label": "Solve for x", "value": f"Solve {text} for x"},
+                {"label": "Calculate Area / Perimeter", "value": f"{text}, find area"},
+                {"label": "Simplify Expression", "value": f"Simplify {text}"}
+            ],
             affected_region={"x": 0, "y": 0, "w": 0, "h": 0},
             symbol_in_question=text[:50]
-        )
+        ),
+        recognized_text=text
     )
 
 

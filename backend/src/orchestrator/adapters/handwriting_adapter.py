@@ -112,13 +112,23 @@ class HandwritingAdapter(BaseAdapter):
         interpreter = UniversalMathInterpreter()
         interpretation = interpreter.interpret(text_to_parse)
 
-        if interpretation.get("domain") != "unknown" and (interpretation.get("ast") or interpretation.get("geometry_problem")):
+        if interpretation.get("is_ambiguous"):
+            umr.understanding.is_ambiguous = True
+            umr.understanding.clarification_question = interpretation.get("clarification_question")
+            umr.understanding.clarification_options = interpretation.get("clarification_options", [])
+            umr.metadata["interpretation"] = interpretation
+            return umr
+
+        if interpretation.get("domain") != "unknown" and (
+            interpretation.get("ast") or interpretation.get("geometry_problem") or interpretation.get("mensuration_problem") or interpretation.get("coordinate_problem")
+        ):
             umr.understanding.topic = interpretation.get("topic", "general")
             umr.understanding.problem_type = interpretation.get("problem_type", "equation")
             umr.understanding.unknowns = interpretation.get("unknowns", ["x"])
             umr.understanding.ast = interpretation.get("ast", {"type": "universal", "domain": interpretation.get("domain")})
             umr.understanding.is_ambiguous = False
             umr.understanding.clarification_question = None
+            umr.understanding.clarification_options = []
 
             if interpretation.get("latex"):
                 umr.input.recognized_latex = interpretation["latex"]
@@ -138,12 +148,16 @@ class HandwritingAdapter(BaseAdapter):
                     self._enrich_understanding(umr)
                     return umr
 
-        # Truly unparsable
+        # Truly unparsable - provide pedagogical clarification options
         umr.understanding.is_ambiguous = True
         umr.understanding.clarification_question = (
-            f"Could not parse '{text_to_parse}' into a verified mathematical expression. "
-            "Please check for missing symbols or operators."
+            f"I couldn't quite determine the exact math goal for '{text_to_parse}'. What would you like to do?"
         )
+        umr.understanding.clarification_options = [
+            f"Solve {text_to_parse} for x",
+            f"Simplify {text_to_parse}",
+            f"Calculate value of {text_to_parse}"
+        ]
 
         return umr
 

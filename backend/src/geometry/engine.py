@@ -271,7 +271,7 @@ class MensurationEngine:
             steps = self._solve_rectangle(problem, step_number)
         elif problem.shape_type == GeometryShapeType.SQUARE:
             steps = self._solve_square(problem, step_number)
-        elif problem.shape_type == GeometryShapeType.TRIANGLE:
+        elif problem.shape_type in [GeometryShapeType.TRIANGLE, GeometryShapeType.RIGHT_TRIANGLE]:
             steps = self._solve_triangle_area(problem, step_number)
         elif problem.shape_type == GeometryShapeType.PARALLELOGRAM:
             steps = self._solve_parallelogram(problem, step_number)
@@ -290,6 +290,12 @@ class MensurationEngine:
         elif problem.shape_type == GeometryShapeType.SPHERE:
             steps = self._solve_sphere(problem, step_number)
         
+        if steps:
+            if isinstance(steps[-1], dict):
+                steps[-1]["is_final_answer"] = True
+                if not steps[-1].get("final_answer_text"):
+                    steps[-1]["final_answer_text"] = steps[-1]["display_math"]
+
         return [GeometrySolutionStep(**s) if isinstance(s, dict) else s for s in steps]
     
     def _solve_rectangle(self, problem: 'MensurationProblem', start_step: int) -> List[Dict[str, Any]]:
@@ -299,38 +305,65 @@ class MensurationEngine:
         length = next((m for m in problem.measurements if "length" in m.label.lower() or "l" == m.label.lower()), None)
         width = next((m for m in problem.measurements if "width" in m.label.lower() or "breadth" in m.label.lower() or "w" == m.label.lower()), None)
         
+        target = (problem.requested_quantity.get("target") or "area").lower() if problem.requested_quantity else "area"
+        unit = (width.unit if width else (length.unit if length else "cm"))
+
         if length and width:
-            step_number += 1
-            area = length.value * width.value
-            steps.append({
-                "step_number": step_number,
-                "operation": "area_rectangle",
-                "equation_ast": {"type": "eq", "left": {"type": "symbol", "name": "A"}, "right": {"type": "mul", "args": [{"type": "symbol", "name": "l"}, {"type": "symbol", "name": "w"}]}},
-                "display_math": f"A = l \\times w = {length.value} \\times {width.value} = {area}",
-                "explanation": f"Area of rectangle: A = length × width = {length.value} × {width.value} = {area} {width.unit}².",
-                "validation": {"is_valid": True, "method": "formula", "details": f"A = l × w = {area}"},
-                "hint": "Multiply length by width.",
-                "is_final_answer": False,
-                "final_answer_text": "",
-                "diagram_focus": ["A", "l", "w"],
-                "diagram_type": "rectangle"
-            })
-            
-            step_number += 1
-            perimeter = 2 * (length.value + width.value)
-            steps.append({
-                "step_number": step_number,
-                "operation": "perimeter_rectangle",
-                "equation_ast": {"type": "eq", "left": {"type": "symbol", "name": "P"}, "right": {"type": "mul", "args": [{"type": "number", "value": 2}, {"type": "add", "args": [{"type": "symbol", "name": "l"}, {"type": "symbol", "name": "w"}]}]}},
-                "display_math": f"P = 2(l + w) = 2({length.value} + {width.value}) = {perimeter}",
-                "explanation": f"Perimeter of rectangle: P = 2(l + w) = 2({length.value} + {width.value}) = {perimeter} {width.unit}.",
-                "validation": {"is_valid": True, "method": "formula", "details": f"P = 2(l + w) = {perimeter}"},
-                "hint": "Add length and width, multiply by 2.",
-                "is_final_answer": False,
-                "final_answer_text": "",
-                "diagram_focus": ["P", "l", "w"],
-                "diagram_type": "rectangle"
-            })
+            l_val = int(length.value) if float(length.value).is_integer() else length.value
+            w_val = int(width.value) if float(width.value).is_integer() else width.value
+
+            if "diag" in target:
+                diag_sq = l_val**2 + w_val**2
+                diag = math.sqrt(diag_sq)
+                d_str = int(diag) if diag.is_integer() else f"{diag:.2f}"
+                step_number += 1
+                steps.append({
+                    "step_number": step_number,
+                    "operation": "diagonal_rectangle",
+                    "equation_ast": {"type": "eq", "left": {"type": "symbol", "name": "d"}, "right": {"type": "sqrt", "arg": {"type": "add", "args": [{"type": "pow", "base": {"type": "symbol", "name": "l"}, "exp": {"type": "number", "value": 2}}, {"type": "pow", "base": {"type": "symbol", "name": "w"}, "exp": {"type": "number", "value": 2}}]}}},
+                    "display_math": f"d = \\sqrt{{l^2 + w^2}} = \\sqrt{{{l_val}^2 + {w_val}^2}} = \\sqrt{{{diag_sq}}} \\approx {d_str}",
+                    "explanation": f"Diagonal of rectangle by Pythagorean theorem: d = √(l² + w²) = √({l_val}² + {w_val}²) = √{diag_sq} ≈ {d_str} {unit}.",
+                    "validation": {"is_valid": True, "method": "pythagoras", "details": f"d = sqrt({l_val}^2 + {w_val}^2) = {d_str}"},
+                    "hint": "Use d = √(l² + w²).",
+                    "is_final_answer": True,
+                    "final_answer_text": f"d = {d_str} {unit}",
+                    "diagram_focus": ["d", "l", "w"],
+                    "diagram_type": "rectangle"
+                })
+            elif "perim" in target:
+                perimeter = 2 * (l_val + w_val)
+                p_str = int(perimeter) if float(perimeter).is_integer() else perimeter
+                step_number += 1
+                steps.append({
+                    "step_number": step_number,
+                    "operation": "perimeter_rectangle",
+                    "equation_ast": {"type": "eq", "left": {"type": "symbol", "name": "P"}, "right": {"type": "mul", "args": [{"type": "number", "value": 2}, {"type": "add", "args": [{"type": "symbol", "name": "l"}, {"type": "symbol", "name": "w"}]}]}},
+                    "display_math": f"P = 2(l + w) = 2({l_val} + {w_val}) = {p_str}",
+                    "explanation": f"Perimeter of rectangle: P = 2(l + w) = 2({l_val} + {w_val}) = {p_str} {unit}.",
+                    "validation": {"is_valid": True, "method": "formula", "details": f"P = 2(l + w) = {p_str}"},
+                    "hint": "Add length and width, then multiply by 2.",
+                    "is_final_answer": True,
+                    "final_answer_text": f"P = {p_str} {unit}",
+                    "diagram_focus": ["P", "l", "w"],
+                    "diagram_type": "rectangle"
+                })
+            else:
+                area = l_val * w_val
+                a_str = int(area) if float(area).is_integer() else area
+                step_number += 1
+                steps.append({
+                    "step_number": step_number,
+                    "operation": "area_rectangle",
+                    "equation_ast": {"type": "eq", "left": {"type": "symbol", "name": "A"}, "right": {"type": "mul", "args": [{"type": "symbol", "name": "l"}, {"type": "symbol", "name": "w"}]}},
+                    "display_math": f"A = l \\times w = {l_val} \\times {w_val} = {a_str}",
+                    "explanation": f"Area of rectangle: A = length × width = {l_val} × {w_val} = {a_str} {unit}².",
+                    "validation": {"is_valid": True, "method": "formula", "details": f"A = l × w = {a_str}"},
+                    "hint": "Multiply length by width.",
+                    "is_final_answer": True,
+                    "final_answer_text": f"A = {a_str} {unit}^2",
+                    "diagram_focus": ["A", "l", "w"],
+                    "diagram_type": "rectangle"
+                })
         
         return [GeometrySolutionStep(**s) if isinstance(s, dict) else s for s in steps]
     
@@ -339,66 +372,240 @@ class MensurationEngine:
         step_number = start_step
         
         side = next((m for m in problem.measurements if "side" in m.label.lower() or "s" == m.label.lower()), None)
+        target = (problem.requested_quantity.get("target") or "area").lower() if problem.requested_quantity else "area"
         
         if side:
-            step_number += 1
-            area = side.value ** 2
-            steps.append({
-                "step_number": step_number,
-                "operation": "area_square",
-                "equation_ast": {"type": "eq", "left": {"type": "symbol", "name": "A"}, "right": {"type": "pow", "base": {"type": "symbol", "name": "s"}, "exp": {"type": "number", "value": 2}}},
-                "display_math": f"A = s^2 = {side.value}^2 = {area}",
-                "explanation": f"Area of square: A = s² = {side.value}² = {area} {side.unit}².",
-                "validation": {"is_valid": True, "method": "formula", "details": f"A = s² = {area}"},
-                "hint": "Square the side length.",
-                "is_final_answer": False,
-                "final_answer_text": "",
-                "diagram_focus": ["A", "s"],
-                "diagram_type": "rectangle"
-            })
-            
-            step_number += 1
-            perimeter = 4 * side.value
-            steps.append({
-                "step_number": step_number,
-                "operation": "perimeter_square",
-                "equation_ast": {"type": "eq", "left": {"type": "symbol", "name": "P"}, "right": {"type": "mul", "args": [{"type": "number", "value": 4}, {"type": "symbol", "name": "s"}]}},
-                "display_math": f"P = 4s = 4 \\times {side.value} = {perimeter}",
-                "explanation": f"Perimeter of square: P = 4s = 4 × {side.value} = {perimeter} {side.unit}.",
-                "validation": {"is_valid": True, "method": "formula", "details": f"P = 4s = {perimeter}"},
-                "hint": "Multiply side by 4.",
-                "is_final_answer": False,
-                "final_answer_text": "",
-                "diagram_focus": ["P", "s"],
-                "diagram_type": "rectangle"
-            })
+            s_val = int(side.value) if float(side.value).is_integer() else side.value
+            unit = side.unit or "cm"
+
+            if "diag" in target:
+                diag = s_val * math.sqrt(2)
+                d_str = f"{diag:.2f}"
+                step_number += 1
+                steps.append({
+                    "step_number": step_number,
+                    "operation": "diagonal_square",
+                    "equation_ast": {"type": "eq", "left": {"type": "symbol", "name": "d"}, "right": {"type": "mul", "args": [{"type": "symbol", "name": "s"}, {"type": "sqrt", "arg": {"type": "number", "value": 2}}]}},
+                    "display_math": f"d = s\\sqrt{{2}} = {s_val}\\sqrt{{2}} \\approx {d_str}",
+                    "explanation": f"Diagonal of square: d = s√2 = {s_val}√2 ≈ {d_str} {unit}.",
+                    "validation": {"is_valid": True, "method": "formula", "details": f"d = s*sqrt(2) ≈ {d_str}"},
+                    "hint": "Multiply side length by √2.",
+                    "is_final_answer": True,
+                    "final_answer_text": f"d = {d_str} {unit}",
+                    "diagram_focus": ["d", "s"],
+                    "diagram_type": "rectangle"
+                })
+            elif "perim" in target:
+                perimeter = 4 * s_val
+                p_str = int(perimeter) if float(perimeter).is_integer() else perimeter
+                step_number += 1
+                steps.append({
+                    "step_number": step_number,
+                    "operation": "perimeter_square",
+                    "equation_ast": {"type": "eq", "left": {"type": "symbol", "name": "P"}, "right": {"type": "mul", "args": [{"type": "number", "value": 4}, {"type": "symbol", "name": "s"}]}},
+                    "display_math": f"P = 4s = 4 \\times {s_val} = {p_str}",
+                    "explanation": f"Perimeter of square: P = 4s = 4 × {s_val} = {p_str} {unit}.",
+                    "validation": {"is_valid": True, "method": "formula", "details": f"P = 4s = {p_str}"},
+                    "hint": "Multiply side length by 4.",
+                    "is_final_answer": True,
+                    "final_answer_text": f"P = {p_str} {unit}",
+                    "diagram_focus": ["P", "s"],
+                    "diagram_type": "rectangle"
+                })
+            else:
+                area = s_val ** 2
+                a_str = int(area) if float(area).is_integer() else area
+                step_number += 1
+                steps.append({
+                    "step_number": step_number,
+                    "operation": "area_square",
+                    "equation_ast": {"type": "eq", "left": {"type": "symbol", "name": "A"}, "right": {"type": "pow", "base": {"type": "symbol", "name": "s"}, "exp": {"type": "number", "value": 2}}},
+                    "display_math": f"A = s^2 = {s_val}^2 = {a_str}",
+                    "explanation": f"Area of square: A = s² = {s_val}² = {a_str} {unit}².",
+                    "validation": {"is_valid": True, "method": "formula", "details": f"A = s² = {a_str}"},
+                    "hint": "Square the side length.",
+                    "is_final_answer": True,
+                    "final_answer_text": f"A = {a_str} {unit}^2",
+                    "diagram_focus": ["A", "s"],
+                    "diagram_type": "rectangle"
+                })
         
         return [GeometrySolutionStep(**s) if isinstance(s, dict) else s for s in steps]
     
     def _solve_triangle_area(self, problem: 'MensurationProblem', start_step: int) -> List[Dict[str, Any]]:
         steps = []
         step_number = start_step
+        target = (problem.requested_quantity.get("target") or "area").lower() if problem.requested_quantity else "area"
         
         base = next((m for m in problem.measurements if "base" in m.label.lower() or "b" == m.label.lower()), None)
         height = next((m for m in problem.measurements if "height" in m.label.lower() or "h" == m.label.lower()), None)
+        lengths = [m for m in problem.measurements if m.measurement_type == MeasurementType.LENGTH or "side" in m.label.lower() or "leg" in m.label.lower() or m.label in ["a", "b", "c"]]
         
+        # Case 1: Base and Height given
         if base and height:
+            b_val = int(base.value) if float(base.value).is_integer() else base.value
+            h_val = int(height.value) if float(height.value).is_integer() else height.value
+            unit = base.unit or "cm"
+            area = 0.5 * b_val * h_val
+            a_str = int(area) if float(area).is_integer() else area
+
             step_number += 1
-            area = 0.5 * base.value * height.value
             steps.append({
                 "step_number": step_number,
                 "operation": "area_triangle",
                 "equation_ast": {"type": "eq", "left": {"type": "symbol", "name": "A"}, "right": {"type": "mul", "args": [{"type": "number", "value": 0.5}, {"type": "symbol", "name": "b"}, {"type": "symbol", "name": "h"}]}},
-                "display_math": f"A = \\frac{{1}}{{2}} b h = \\frac{{1}}{{2}} \\times {base.value} \\times {height.value} = {area}",
-                "explanation": f"Area of triangle: A = ½ × base × height = ½ × {base.value} × {height.value} = {area} {base.unit}².",
-                "validation": {"is_valid": True, "method": "formula", "details": f"A = ½bh = {area}"},
+                "display_math": f"A = \\frac{{1}}{{2}} b h = \\frac{{1}}{{2}} \\times {b_val} \\times {h_val} = {a_str}",
+                "explanation": f"Area of triangle: A = ½ × base × height = ½ × {b_val} × {h_val} = {a_str} {unit}².",
+                "validation": {"is_valid": True, "method": "formula", "details": f"A = ½bh = {a_str}"},
                 "hint": "Multiply base by height, then halve.",
-                "is_final_answer": False,
-                "final_answer_text": "",
+                "is_final_answer": True,
+                "final_answer_text": f"A = {a_str} {unit}^2",
                 "diagram_focus": ["A", "b", "h"],
                 "diagram_type": "triangle"
             })
-        
+            return [GeometrySolutionStep(**s) if isinstance(s, dict) else s for s in steps]
+
+        # Case 2: Right Triangle with 2 legs given
+        is_right = (problem.shape_type == GeometryShapeType.RIGHT_TRIANGLE) or any("leg" in m.label.lower() for m in lengths)
+        if is_right and len(lengths) == 2:
+            a = lengths[0].value
+            b = lengths[1].value
+            a_val = int(a) if float(a).is_integer() else a
+            b_val = int(b) if float(b).is_integer() else b
+            unit = lengths[0].unit or "cm"
+
+            if "area" in target:
+                area = 0.5 * a_val * b_val
+                a_str = int(area) if float(area).is_integer() else area
+                step_number += 1
+                steps.append({
+                    "step_number": step_number,
+                    "operation": "right_triangle_area",
+                    "equation_ast": {"type": "eq", "left": {"type": "symbol", "name": "A"}, "right": {"type": "mul", "args": [{"type": "number", "value": 0.5}, {"type": "number", "value": float(a_val)}, {"type": "number", "value": float(b_val)}]}},
+                    "display_math": f"A = \\frac{{1}}{{2}} a b = \\frac{{1}}{{2}} \\times {a_val} \\times {b_val} = {a_str}",
+                    "explanation": f"In a right triangle, the legs act as base and height: Area = ½ × a × b = ½ × {a_val} × {b_val} = {a_str} {unit}².",
+                    "validation": {"is_valid": True, "method": "formula", "details": f"A = ½ab = {a_str}"},
+                    "hint": "Multiply the two legs and divide by 2.",
+                    "is_final_answer": True,
+                    "final_answer_text": f"A = {a_str} {unit}^2",
+                    "diagram_focus": ["A", "a", "b"],
+                    "diagram_type": "triangle"
+                })
+                return [GeometrySolutionStep(**s) if isinstance(s, dict) else s for s in steps]
+
+        # Case 3: 3 side lengths given (Heron's Formula, Shortest Length, Longest Length, Perimeter)
+        if len(lengths) >= 3:
+            s_vals = [int(l.value) if float(l.value).is_integer() else l.value for l in lengths[:3]]
+            a, b, c = s_vals[0], s_vals[1], s_vals[2]
+            unit = lengths[0].unit or "cm"
+
+            if "short" in target:
+                shortest_val = min(a, b, c)
+                step_number += 1
+                steps.append({
+                    "step_number": step_number,
+                    "operation": "compare_lengths",
+                    "equation_ast": {"type": "compare", "values": s_vals},
+                    "display_math": f"\\text{{Side lengths: }} a = {a}, \\; b = {b}, \\; c = {c}",
+                    "explanation": f"Given the triangle side lengths {a}, {b}, and {c}, we compare them to identify the shortest.",
+                    "validation": {"is_valid": True, "method": "comparison", "details": f"Sides {s_vals}"},
+                    "hint": "Identify the smallest numerical side length.",
+                    "is_final_answer": False,
+                    "final_answer_text": "",
+                    "diagram_focus": ["sides"],
+                    "diagram_type": "triangle"
+                })
+                step_number += 1
+                steps.append({
+                    "step_number": step_number,
+                    "operation": "identify_shortest_length",
+                    "equation_ast": {"type": "min", "result": shortest_val},
+                    "display_math": f"\\min({a}, {b}, {c}) = {shortest_val}",
+                    "explanation": f"Comparing the values: {shortest_val} is the minimum among {a}, {b}, and {c}. Therefore, the shortest length is {shortest_val} {unit}.",
+                    "validation": {"is_valid": True, "method": "minimum", "details": f"min({a}, {b}, {c}) = {shortest_val}"},
+                    "hint": f"The shortest length is {shortest_val}.",
+                    "is_final_answer": True,
+                    "final_answer_text": f"\\text{{Shortest length}} = {shortest_val} {unit}",
+                    "diagram_focus": ["shortest"],
+                    "diagram_type": "triangle"
+                })
+                return [GeometrySolutionStep(**s) if isinstance(s, dict) else s for s in steps]
+
+            elif "long" in target or "hyp" in target:
+                longest_val = max(a, b, c)
+                step_number += 1
+                steps.append({
+                    "step_number": step_number,
+                    "operation": "identify_longest_length",
+                    "equation_ast": {"type": "max", "result": longest_val},
+                    "display_math": f"\\max({a}, {b}, {c}) = {longest_val}",
+                    "explanation": f"Comparing the sides: {longest_val} is the maximum among {a}, {b}, and {c}. The longest length is {longest_val} {unit}.",
+                    "validation": {"is_valid": True, "method": "maximum", "details": f"max({a}, {b}, {c}) = {longest_val}"},
+                    "hint": f"The longest side is {longest_val}.",
+                    "is_final_answer": True,
+                    "final_answer_text": f"\\text{{Longest length}} = {longest_val} {unit}",
+                    "diagram_focus": ["longest"],
+                    "diagram_type": "triangle"
+                })
+                return [GeometrySolutionStep(**s) if isinstance(s, dict) else s for s in steps]
+
+            elif "perim" in target:
+                perim = a + b + c
+                p_str = int(perim) if float(perim).is_integer() else perim
+                step_number += 1
+                steps.append({
+                    "step_number": step_number,
+                    "operation": "perimeter_triangle",
+                    "equation_ast": {"type": "eq", "left": {"type": "symbol", "name": "P"}, "right": {"type": "add", "args": [{"type": "number", "value": float(a)}, {"type": "number", "value": float(b)}, {"type": "number", "value": float(c)}]}},
+                    "display_math": f"P = a + b + c = {a} + {b} + {c} = {p_str}",
+                    "explanation": f"Perimeter of triangle: P = a + b + c = {a} + {b} + {c} = {p_str} {unit}.",
+                    "validation": {"is_valid": True, "method": "addition", "details": f"P = {a} + {b} + {c} = {p_str}"},
+                    "hint": "Add all three sides together.",
+                    "is_final_answer": True,
+                    "final_answer_text": f"P = {p_str} {unit}",
+                    "diagram_focus": ["P"],
+                    "diagram_type": "triangle"
+                })
+                return [GeometrySolutionStep(**s) if isinstance(s, dict) else s for s in steps]
+
+            else:
+                # Heron's Formula for Area
+                s_semi = (a + b + c) / 2.0
+                s_str = int(s_semi) if s_semi.is_integer() else s_semi
+                step_number += 1
+                steps.append({
+                    "step_number": step_number,
+                    "operation": "semi_perimeter",
+                    "equation_ast": {"type": "eq", "left": {"type": "symbol", "name": "s"}, "right": {"type": "div", "args": [{"type": "add", "args": [{"type": "number", "value": float(a)}, {"type": "number", "value": float(b)}, {"type": "number", "value": float(c)}]}, {"type": "number", "value": 2}]}},
+                    "display_math": f"s = \\frac{{a + b + c}}{{2}} = \\frac{{{a} + {b} + {c}}}{{2}} = {s_str}",
+                    "explanation": f"First calculate the semi-perimeter: s = (a + b + c) / 2 = ({a} + {b} + {c}) / 2 = {s_str} {unit}.",
+                    "validation": {"is_valid": True, "method": "formula", "details": f"s = ({a}+{b}+{c})/2 = {s_str}"},
+                    "hint": "Add all three sides and divide by 2.",
+                    "is_final_answer": False,
+                    "final_answer_text": "",
+                    "diagram_focus": ["s"],
+                    "diagram_type": "triangle"
+                })
+
+                radicand = s_semi * (s_semi - a) * (s_semi - b) * (s_semi - c)
+                area = math.sqrt(max(0, radicand))
+                a_str = int(area) if area.is_integer() else f"{area:.2f}"
+                step_number += 1
+                steps.append({
+                    "step_number": step_number,
+                    "operation": "herons_formula",
+                    "equation_ast": {"type": "eq", "left": {"type": "symbol", "name": "A"}, "right": {"type": "sqrt", "arg": {"type": "number", "value": float(radicand)}}},
+                    "display_math": f"A = \\sqrt{{s(s-a)(s-b)(s-c)}} = \\sqrt{{{s_str}({s_str}-{a})({s_str}-{b})({s_str}-{c})}} = {a_str}",
+                    "explanation": f"Apply Heron's formula: A = √(s(s-a)(s-b)(s-c)) = √({s_str} × {s_str-a} × {s_str-b} × {s_str-c}) = {a_str} {unit}².",
+                    "validation": {"is_valid": True, "method": "heron", "details": f"sqrt({radicand}) = {a_str}"},
+                    "hint": "Substitute s and sides into Heron's formula.",
+                    "is_final_answer": True,
+                    "final_answer_text": f"A = {a_str} {unit}^2",
+                    "diagram_focus": ["A"],
+                    "diagram_type": "triangle"
+                })
+                return [GeometrySolutionStep(**s) if isinstance(s, dict) else s for s in steps]
+
         return [GeometrySolutionStep(**s) if isinstance(s, dict) else s for s in steps]
     
     def _solve_parallelogram(self, problem: 'MensurationProblem', start_step: int) -> List[Dict[str, Any]]:
@@ -461,22 +668,61 @@ class MensurationEngine:
         radius = next((m for m in problem.measurements if m.measurement_type.value == "radius"), None)
         diameter = next((m for m in problem.measurements if m.measurement_type.value == "diameter"), None)
         
+        target = (problem.requested_quantity.get("target") or "area").lower() if problem.requested_quantity else "area"
+        
         if radius:
             r = radius.value
-            area = math.pi * r**2
-            steps.append({
-                "step_number": step_number + 1,
-                "operation": "area_circle",
-                "equation_ast": {"type": "eq", "left": {"type": "symbol", "name": "A"}, "right": {"type": "mul", "args": [{"type": "symbol", "name": "pi"}, {"type": "pow", "base": {"type": "symbol", "name": "r"}, "exp": {"type": "number", "value": 2}}]}},
-                "display_math": f"A = \\pi r^2 = \\pi \\times {r}^2 \\approx {area:.2f}",
-                "explanation": f"Area of circle: A = πr² = π × {r}² ≈ {area:.2f} {r.unit}².",
-                "validation": {"is_valid": True, "method": "formula", "details": f"A = πr² ≈ {area:.2f}"},
-                "hint": "Use A = πr².",
-                "is_final_answer": False,
-                "final_answer_text": "",
-                "diagram_focus": ["A", "r"],
-                "diagram_type": "circle"
-            })
+            r_val = int(r) if float(r).is_integer() else r
+            unit = radius.unit or "cm"
+
+            if "circum" in target or "perim" in target:
+                circ = 2 * math.pi * r_val
+                step_number += 1
+                steps.append({
+                    "step_number": step_number,
+                    "operation": "circumference_circle",
+                    "equation_ast": {"type": "eq", "left": {"type": "symbol", "name": "C"}, "right": {"type": "mul", "args": [{"type": "number", "value": 2}, {"type": "symbol", "name": "pi"}, {"type": "symbol", "name": "r"}]}},
+                    "display_math": f"C = 2\\pi r = 2 \\times \\pi \\times {r_val} \\approx {circ:.2f}",
+                    "explanation": f"Circumference of circle: C = 2πr = 2 × π × {r_val} ≈ {circ:.2f} {unit}.",
+                    "validation": {"is_valid": True, "method": "formula", "details": f"C = 2*pi*r ≈ {circ:.2f}"},
+                    "hint": "Use C = 2πr.",
+                    "is_final_answer": True,
+                    "final_answer_text": f"C \\approx {circ:.2f} {unit}",
+                    "diagram_focus": ["C", "r"],
+                    "diagram_type": "circle"
+                })
+            elif "diam" in target:
+                diam = 2 * r_val
+                step_number += 1
+                steps.append({
+                    "step_number": step_number,
+                    "operation": "diameter_circle",
+                    "equation_ast": {"type": "eq", "left": {"type": "symbol", "name": "d"}, "right": {"type": "mul", "args": [{"type": "number", "value": 2}, {"type": "symbol", "name": "r"}]}},
+                    "display_math": f"d = 2r = 2 \\times {r_val} = {diam}",
+                    "explanation": f"Diameter of circle: d = 2r = 2 × {r_val} = {diam} {unit}.",
+                    "validation": {"is_valid": True, "method": "formula", "details": f"d = 2r = {diam}"},
+                    "hint": "Double the radius.",
+                    "is_final_answer": True,
+                    "final_answer_text": f"d = {diam} {unit}",
+                    "diagram_focus": ["d", "r"],
+                    "diagram_type": "circle"
+                })
+            else:
+                area = math.pi * r_val**2
+                step_number += 1
+                steps.append({
+                    "step_number": step_number,
+                    "operation": "area_circle",
+                    "equation_ast": {"type": "eq", "left": {"type": "symbol", "name": "A"}, "right": {"type": "mul", "args": [{"type": "symbol", "name": "pi"}, {"type": "pow", "base": {"type": "symbol", "name": "r"}, "exp": {"type": "number", "value": 2}}]}},
+                    "display_math": f"A = \\pi r^2 = \\pi \\times {r_val}^2 \\approx {area:.2f}",
+                    "explanation": f"Area of circle: A = πr² = π × {r_val}² ≈ {area:.2f} {unit}².",
+                    "validation": {"is_valid": True, "method": "formula", "details": f"A = πr² ≈ {area:.2f}"},
+                    "hint": "Use A = πr².",
+                    "is_final_answer": True,
+                    "final_answer_text": f"A \\approx {area:.2f} {unit}^2",
+                    "diagram_focus": ["A", "r"],
+                    "diagram_type": "circle"
+                })
         
         return [GeometrySolutionStep(**s) if isinstance(s, dict) else s for s in steps]
     

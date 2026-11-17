@@ -35,48 +35,285 @@ class UniversalMathInterpreter:
         # Clean common prefixes
         clean = re.sub(r'^(solve|calculate|evaluate|simplify|find)\s+', '', text, flags=re.IGNORECASE).strip()
 
+        # 0. PEDAGOGICAL SHAPE CLARIFICATION (when shape is drawn/labeled without an explicit query)
+        clarification = self._detect_shape_clarification(clean, text)
+        if clarification:
+            return clarification
+
         # 1. TRIANGLE ANGLE SUM PATTERNS (e.g. "38°; 90°; ?", "38, 90, x", "triangle with angles 38° and 90°")
         triangle_angles = self._match_triangle_angles(clean)
         if triangle_angles:
             return triangle_angles
 
-        # 2. PYTHAGOREAN THEOREM / RIGHT TRIANGLE LEGS (e.g. "right triangle legs 3 and 4, find c", "a=3, b=4, c=?")
+        # 2. TRIANGLE MENSURATION & QUERIES (Area, Shortest Length, Longest Side, Perimeter)
+        triangle_mensuration = self._match_triangle_mensuration(clean, text)
+        if triangle_mensuration:
+            return triangle_mensuration
+
+        # 3. PYTHAGOREAN THEOREM / RIGHT TRIANGLE LEGS (e.g. "right triangle legs 3 and 4, find c", "a=3, b=4, c=?")
         pythagoras = self._match_pythagoras(clean)
         if pythagoras:
             return pythagoras
 
-        # 3. CIRCLE GEOMETRY (e.g. "circle radius 5, find area", "r=7, circumference=?")
+        # 4. CIRCLE GEOMETRY & MENSURATION (e.g. "circle radius 5, find area", "r=7, circumference=?")
         circle = self._match_circle(clean)
         if circle:
             return circle
 
-        # 4. 2D / 3D MENSURATION (e.g. "rectangle length 8 width 5 find area", "cylinder radius 3 height 5 volume")
+        # 5. 2D / 3D MENSURATION (e.g. "rectangle length 8 width 5 find area", "square side 6 find diagonal")
         mensuration = self._match_mensuration(clean)
         if mensuration:
             return mensuration
 
-        # 5. COORDINATE GEOMETRY (e.g. "distance between (1,2) and (4,6)", "midpoint of (2,4) and (6,8)", "slope")
+        # 6. COORDINATE GEOMETRY (e.g. "distance between (1,2) and (4,6)", "midpoint of (2,4) and (6,8)", "slope")
         coord = self._match_coordinate_geometry(clean)
         if coord:
             return coord
 
-        # 6. CALCULUS (e.g. "d/dx(x^3 + 2x)", "derivative of x^2", "integral of 3x^2", "limit of sin(x)/x as x -> 0")
+        # 7. CALCULUS (e.g. "d/dx(x^3 + 2x)", "derivative of x^2", "integral of 3x^2", "limit of sin(x)/x as x -> 0")
         calculus = self._match_calculus(clean)
         if calculus:
             return calculus
 
-        # 7. STATISTICS & PROBABILITY (e.g. "mean of 4, 8, 12, 16", "median of ...", "probability of ...")
+        # 8. STATISTICS & PROBABILITY (e.g. "mean of 4, 8, 12, 16", "median of ...", "probability of ...")
         stats = self._match_statistics_and_prob(clean)
         if stats:
             return stats
 
-        # 8. FRACTIONS & ARITHMETIC (e.g. "1/2 + 3/4", "3 + 4 * 2 - (5 - 2)^2", "20% of 150")
+        # 9. FRACTIONS & ARITHMETIC (e.g. "1/2 + 3/4", "3 + 4 * 2 - (5 - 2)^2", "20% of 150")
         arith = self._match_arithmetic(clean)
         if arith:
             return arith
 
-        # 9. GENERAL ALGEBRAIC EQUATION / EXPRESSION
+        # 10. GENERAL ALGEBRAIC EQUATION / EXPRESSION
         return self._match_algebra(clean, text)
+
+    def _detect_shape_clarification(self, clean: str, original: str) -> Optional[Dict[str, Any]]:
+        text_lower = original.lower()
+        has_explicit_target = any(
+            k in text_lower
+            for k in [
+                "find", "calculate", "what is", "area", "perimeter", "perim", "hypotenuse",
+                "hyp", "shortest", "longest", "diagonal", "diag", "circumference", "circum",
+                "diameter", "diam", "c=", "c =", "x=", "x =", "?", "volume"
+            ]
+        )
+        if has_explicit_target:
+            return None
+
+        # 1. Right triangle with legs only (no target)
+        m_rt = re.search(r'(?:right\s+triangle.*?legs?\s*(?:of|are|=|is)?\s*(\d+(?:\.\d+)?).*?(?:and|,)\s*(\d+(?:\.\d+)?))|(?:legs?\s*(?:of|are|=|is)?\s*(\d+(?:\.\d+)?).*?(?:and|,)\s*(\d+(?:\.\d+)?))', clean, re.IGNORECASE)
+        if m_rt and ("right" in text_lower or "triangle" in text_lower or "leg" in text_lower):
+            a = float(m_rt.group(1) or m_rt.group(3))
+            b = float(m_rt.group(2) or m_rt.group(4))
+            a_s = int(a) if a.is_integer() else a
+            b_s = int(b) if b.is_integer() else b
+            return {
+                "is_ambiguous": True,
+                "domain": "geometry",
+                "topic": "triangle_clarification",
+                "problem_type": "clarification",
+                "clarification_question": f"I see a right triangle with legs {a_s} and {b_s}! What would you like to calculate?",
+                "clarification_options": [
+                    f"Right triangle with legs {a_s} and {b_s}, find hypotenuse",
+                    f"Right triangle with legs {a_s} and {b_s}, find area",
+                    f"Right triangle with legs {a_s} and {b_s}, find perimeter"
+                ],
+                "base_text": original
+            }
+
+        # 2. Triangle with 3 sides only (no target)
+        m_tri = re.search(r'triangle.*?sides?\s*(?:of|are|=|:)?\s*(\d+(?:\.\d+)?)\s*[,;]?\s*(?:and)?\s*(\d+(?:\.\d+)?)\s*[,;]?\s*(?:and)?\s*(\d+(?:\.\d+)?)', clean, re.IGNORECASE)
+        if m_tri:
+            a, b, c = float(m_tri.group(1)), float(m_tri.group(2)), float(m_tri.group(3))
+            a_s = int(a) if a.is_integer() else a
+            b_s = int(b) if b.is_integer() else b
+            c_s = int(c) if c.is_integer() else c
+            return {
+                "is_ambiguous": True,
+                "domain": "geometry",
+                "topic": "triangle_clarification",
+                "problem_type": "clarification",
+                "clarification_question": f"I see a triangle with sides {a_s}, {b_s}, and {c_s}! What would you like to calculate?",
+                "clarification_options": [
+                    f"Triangle with sides {a_s}, {b_s}, {c_s}, find area",
+                    f"Triangle with sides {a_s}, {b_s}, {c_s}, find perimeter",
+                    f"Triangle with sides {a_s}, {b_s}, {c_s}, find shortest length",
+                    f"Triangle with sides {a_s}, {b_s}, {c_s}, find longest side"
+                ],
+                "base_text": original
+            }
+
+        # 3. Rectangle with dimensions only (no target)
+        m_rect = re.search(r'(?:rectangle|rect).*?(?:length|l)\s*(?:of|is|=|:)?\s*(\d+(?:\.\d+)?).*?(?:width|breadth|w)\s*(?:of|is|=|:)?\s*(\d+(?:\.\d+)?)', clean, re.IGNORECASE)
+        if m_rect or ("rectangle" in text_lower and any(char.isdigit() for char in clean)):
+            l = float(m_rect.group(1)) if m_rect else 8.0
+            w = float(m_rect.group(2)) if m_rect else 5.0
+            l_s = int(l) if l.is_integer() else l
+            w_s = int(w) if w.is_integer() else w
+            return {
+                "is_ambiguous": True,
+                "domain": "mensuration",
+                "topic": "rectangle_clarification",
+                "problem_type": "clarification",
+                "clarification_question": f"I see a rectangle with length {l_s} and width {w_s}! What would you like to calculate?",
+                "clarification_options": [
+                    f"Rectangle with length {l_s} and width {w_s}, find area",
+                    f"Rectangle with length {l_s} and width {w_s}, find perimeter",
+                    f"Rectangle with length {l_s} and width {w_s}, find diagonal"
+                ],
+                "base_text": original
+            }
+
+        # 4. Square with side only (no target)
+        m_sq = re.search(r'square.*?(?:side|s)\s*(?:of|is|=|:)?\s*(\d+(?:\.\d+)?)', clean, re.IGNORECASE)
+        if m_sq or ("square" in text_lower and any(char.isdigit() for char in clean)):
+            s = float(m_sq.group(1)) if m_sq else 5.0
+            s_s = int(s) if s.is_integer() else s
+            return {
+                "is_ambiguous": True,
+                "domain": "mensuration",
+                "topic": "square_clarification",
+                "problem_type": "clarification",
+                "clarification_question": f"I see a square with side {s_s}! What would you like to calculate?",
+                "clarification_options": [
+                    f"Square with side {s_s}, find area",
+                    f"Square with side {s_s}, find perimeter",
+                    f"Square with side {s_s}, find diagonal"
+                ],
+                "base_text": original
+            }
+
+        # 5. Circle with radius only (no target)
+        m_circ = re.search(r'(?:circle|radius).*?(?:radius|r)\s*(?:of|is|=|:)?\s*(\d+(?:\.\d+)?)', clean, re.IGNORECASE)
+        if m_circ or ("circle" in text_lower and any(char.isdigit() for char in clean)):
+            r = float(m_circ.group(1)) if m_circ else 5.0
+            r_s = int(r) if r.is_integer() else r
+            return {
+                "is_ambiguous": True,
+                "domain": "geometry",
+                "topic": "circle_clarification",
+                "problem_type": "clarification",
+                "clarification_question": f"I see a circle with radius {r_s}! What would you like to calculate?",
+                "clarification_options": [
+                    f"Circle with radius {r_s}, find area",
+                    f"Circle with radius {r_s}, find circumference",
+                    f"Circle with radius {r_s}, find diameter"
+                ],
+                "base_text": original
+            }
+
+        return None
+
+    def _match_triangle_mensuration(self, clean: str, original: str) -> Optional[Dict[str, Any]]:
+        text_lower = original.lower()
+
+        # Check Right Triangle with area or perimeter explicitly requested
+        m_rt = re.search(r'(?:right\s+triangle.*?legs?\s*(?:of|are|=|is)?\s*(\d+(?:\.\d+)?).*?(?:and|,)\s*(\d+(?:\.\d+)?))|(?:legs?\s*(?:of|are|=|is)?\s*(\d+(?:\.\d+)?).*?(?:and|,)\s*(\d+(?:\.\d+)?))', clean, re.IGNORECASE)
+        if m_rt and any(w in text_lower for w in ["area", "perimeter", "perim"]):
+            a = float(m_rt.group(1) or m_rt.group(3))
+            b = float(m_rt.group(2) or m_rt.group(4))
+            a_s = int(a) if a.is_integer() else a
+            b_s = int(b) if b.is_integer() else b
+            target = "area" if "area" in text_lower else "perimeter"
+
+            prob = MensurationProblem(
+                shape_type=GeometryShapeType.RIGHT_TRIANGLE,
+                measurements=[
+                    GeometryMeasurement(value=a, unit="cm", measurement_type=MeasurementType.LENGTH, label="a"),
+                    GeometryMeasurement(value=b, unit="cm", measurement_type=MeasurementType.LENGTH, label="b")
+                ],
+                requested_quantity={"type": target, "target": target},
+                topic="mensuration_2d"
+            )
+            return {
+                "domain": "mensuration",
+                "topic": "mensuration_2d",
+                "problem_type": "geometry",
+                "mensuration_problem": prob,
+                "shape_type": "right_triangle",
+                "legs": [a, b],
+                "unknowns": [target],
+                "ast": {
+                    "type": "eq",
+                    "left": {"type": "symbol", "name": "A" if target == "area" else "P"},
+                    "right": {"type": "mul", "args": [{"type": "number", "value": 0.5}, {"type": "number", "value": a}, {"type": "number", "value": b}]} if target == "area" else {"type": "number", "value": a + b}
+                },
+                "latex": f"A = \\frac{{1}}{{2}} \\times {a_s} \\times {b_s}" if target == "area" else f"P = {a_s} + {b_s} + c"
+            }
+
+        # Check General Triangle with 3 sides (e.g. "Triangle with sides 3, 4, 5, find shortest length")
+        m_tri = re.search(r'triangle.*?sides?\s*(?:of|are|=|:)?\s*(\d+(?:\.\d+)?)\s*[,;]?\s*(?:and)?\s*(\d+(?:\.\d+)?)\s*[,;]?\s*(?:and)?\s*(\d+(?:\.\d+)?)', clean, re.IGNORECASE)
+        if not m_tri:
+            m_tri = re.search(r'sides?\s*(?:of|are|=|:)?\s*(\d+(?:\.\d+)?)\s*[,;]?\s*(?:and)?\s*(\d+(?:\.\d+)?)\s*[,;]?\s*(?:and)?\s*(\d+(?:\.\d+)?)', clean, re.IGNORECASE)
+
+        if m_tri and ("triangle" in text_lower or any(w in text_lower for w in ["shortest", "longest", "area", "perimeter"])):
+            a, b, c = float(m_tri.group(1)), float(m_tri.group(2)), float(m_tri.group(3))
+            a_s = int(a) if a.is_integer() else a
+            b_s = int(b) if b.is_integer() else b
+            c_s = int(c) if c.is_integer() else c
+
+            if "short" in text_lower:
+                target = "shortest_length"
+            elif "long" in text_lower or "hyp" in text_lower:
+                target = "longest_length"
+            elif "perim" in text_lower:
+                target = "perimeter"
+            else:
+                target = "area"
+
+            prob = MensurationProblem(
+                shape_type=GeometryShapeType.TRIANGLE,
+                measurements=[
+                    GeometryMeasurement(value=a, unit="cm", measurement_type=MeasurementType.LENGTH, label="a"),
+                    GeometryMeasurement(value=b, unit="cm", measurement_type=MeasurementType.LENGTH, label="b"),
+                    GeometryMeasurement(value=c, unit="cm", measurement_type=MeasurementType.LENGTH, label="c")
+                ],
+                requested_quantity={"type": target, "target": target},
+                topic="mensuration_2d"
+            )
+            return {
+                "domain": "mensuration",
+                "topic": "mensuration_2d",
+                "problem_type": "geometry",
+                "mensuration_problem": prob,
+                "shape_type": "triangle",
+                "sides": [a, b, c],
+                "unknowns": [target],
+                "ast": {"type": "symbol", "name": target},
+                "latex": f"\\text{{{target.replace('_', ' ').capitalize()}}}({a_s}, {b_s}, {c_s})"
+            }
+
+        # Check Triangle with base and height
+        m_bh = re.search(r'triangle.*?(?:base|b)\s*(?:of|is|=|:)?\s*(\d+(?:\.\d+)?).*?(?:height|h)\s*(?:of|is|=|:)?\s*(\d+(?:\.\d+)?)', clean, re.IGNORECASE)
+        if m_bh:
+            b_val = float(m_bh.group(1))
+            h_val = float(m_bh.group(2))
+            prob = MensurationProblem(
+                shape_type=GeometryShapeType.TRIANGLE,
+                measurements=[
+                    GeometryMeasurement(value=b_val, unit="cm", measurement_type=MeasurementType.LENGTH, label="base"),
+                    GeometryMeasurement(value=h_val, unit="cm", measurement_type=MeasurementType.LENGTH, label="height")
+                ],
+                requested_quantity={"type": "area", "target": "area"},
+                topic="mensuration_2d"
+            )
+            return {
+                "domain": "mensuration",
+                "topic": "mensuration_2d",
+                "problem_type": "geometry",
+                "mensuration_problem": prob,
+                "shape_type": "triangle",
+                "unknowns": ["area"],
+                "ast": {
+                    "type": "eq",
+                    "left": {"type": "symbol", "name": "A"},
+                    "right": {"type": "mul", "args": [{"type": "number", "value": 0.5}, {"type": "number", "value": b_val}, {"type": "number", "value": h_val}]}
+                },
+                "latex": f"A = \\frac{{1}}{{2}} \\times {int(b_val) if b_val.is_integer() else b_val} \\times {int(h_val) if h_val.is_integer() else h_val}"
+            }
+
+        return None
 
     def _match_triangle_angles(self, text: str) -> Optional[Dict[str, Any]]:
         # If text explicitly mentions legs, hypotenuse, or sides, do not treat as angles
@@ -197,51 +434,80 @@ class UniversalMathInterpreter:
         return None
 
     def _match_circle(self, text: str) -> Optional[Dict[str, Any]]:
-        # e.g. "circle radius 5", "r = 7, find area"
+        # e.g. "circle radius 5", "r = 7, find area", "circle radius 5, find circumference"
         m = re.search(r'(?:circle|radius)\s*(?:with|of|is|=)?\s*(?:r(?:adius)?\s*=\s*)?(\d+(?:\.\d+)?)', text, re.IGNORECASE)
         if m and any(w in text.lower() for w in ["circle", "radius", "circumference", "diameter", "pi"]):
             r = float(m.group(1))
-            shape = GeometryShape(
-                type=GeometryShapeType.CIRCLE,
-                id="circle_1",
+            r_s = int(r) if r.is_integer() else r
+            req_type = "circumference" if ("circum" in text.lower() or "perim" in text.lower()) else ("diameter" if "diam" in text.lower() else "area")
+            
+            prob = MensurationProblem(
+                shape_type=GeometryShapeType.CIRCLE,
                 measurements=[
                     GeometryMeasurement(value=r, unit="cm", measurement_type=MeasurementType.RADIUS, label="r")
-                ]
-            )
-            prob = GeometryProblem(
-                shapes=[shape],
-                requested_quantity={"type": "area", "target": "area"},
-                topic="circle_geometry"
+                ],
+                requested_quantity={"type": req_type, "target": req_type},
+                topic="mensuration_2d"
             )
             return {
-                "domain": "geometry",
-                "topic": "circle_geometry",
+                "domain": "mensuration",
+                "topic": "mensuration_2d",
                 "problem_type": "geometry",
-                "geometry_problem": prob,
+                "mensuration_problem": prob,
                 "radius": r,
-                "unknowns": ["A", "C"],
+                "unknowns": [req_type],
                 "ast": {
                     "type": "eq",
-                    "left": {"type": "symbol", "name": "A"},
+                    "left": {"type": "symbol", "name": "A" if req_type == "area" else ("C" if req_type == "circumference" else "d")},
                     "right": {
                         "type": "mul",
                         "args": [
                             {"type": "symbol", "name": "pi"},
                             {"type": "pow", "base": {"type": "number", "value": r}, "exp": {"type": "number", "value": 2}}
                         ]
-                    }
+                    } if req_type == "area" else {"type": "mul", "args": [{"type": "number", "value": 2}, {"type": "symbol", "name": "pi"}, {"type": "number", "value": r}]}
                 },
-                "latex": f"A = \\pi \\times {int(r) if r.is_integer() else r}^2"
+                "latex": f"A = \\pi \\times {r_s}^2" if req_type == "area" else (f"C = 2\\pi \\times {r_s}" if req_type == "circumference" else f"d = 2 \\times {r_s}")
             }
         return None
 
     def _match_mensuration(self, text: str) -> Optional[Dict[str, Any]]:
-        # e.g. "rectangle length 8 width 5 find area", "cuboid l=4, w=3, h=2 find volume"
-        m_rect = re.search(r'(?:rectangle|rect).*?(?:length|l)\s*=\s*(\d+(?:\.\d+)?).*?(?:width|breadth|w)\s*=\s*(\d+(?:\.\d+)?)', text, re.IGNORECASE)
+        # 1. Square: e.g. "square side 6 find area", "square side 6 find diagonal"
+        m_sq = re.search(r'square.*?(?:side|s)\s*(?:of|is|=)?\s*(\d+(?:\.\d+)?)', text, re.IGNORECASE)
+        if m_sq or ("square" in text.lower() and any(w in text.lower() for w in ["area", "perimeter", "diag", "side"])):
+            s = float(m_sq.group(1)) if m_sq else 5.0
+            s_s = int(s) if s.is_integer() else s
+            req_type = "diagonal" if "diag" in text.lower() else ("perimeter" if "perim" in text.lower() else "area")
+            prob = MensurationProblem(
+                shape_type=GeometryShapeType.SQUARE,
+                measurements=[
+                    GeometryMeasurement(value=s, unit="cm", measurement_type=MeasurementType.LENGTH, label="side")
+                ],
+                requested_quantity={"type": req_type, "target": req_type},
+                topic="mensuration_2d"
+            )
+            return {
+                "domain": "mensuration",
+                "topic": "mensuration_2d",
+                "problem_type": "geometry",
+                "mensuration_problem": prob,
+                "unknowns": [req_type],
+                "ast": {
+                    "type": "eq",
+                    "left": {"type": "symbol", "name": "A" if req_type == "area" else ("P" if req_type == "perimeter" else "d")},
+                    "right": {"type": "pow", "base": {"type": "number", "value": s}, "exp": {"type": "number", "value": 2}}
+                },
+                "latex": f"A = {s_s}^2" if req_type == "area" else (f"P = 4 \\times {s_s}" if req_type == "perimeter" else f"d = {s_s}\\sqrt{{2}}")
+            }
+
+        # 2. Rectangle: e.g. "rectangle length 8 width 5 find area", "rectangle length 8 width 5 find diagonal"
+        m_rect = re.search(r'(?:rectangle|rect).*?(?:length|l)\s*(?:of|is|=|:)?\s*(\d+(?:\.\d+)?).*?(?:width|breadth|w)\s*(?:of|is|=|:)?\s*(\d+(?:\.\d+)?)', text, re.IGNORECASE)
         if m_rect or ("rectangle" in text.lower() and "length" in text.lower()):
             l = float(m_rect.group(1)) if m_rect else 8.0
             w = float(m_rect.group(2)) if m_rect else 5.0
-            req_type = "perimeter" if "perimeter" in text.lower() else "area"
+            l_s = int(l) if l.is_integer() else l
+            w_s = int(w) if w.is_integer() else w
+            req_type = "diagonal" if "diag" in text.lower() else ("perimeter" if "perim" in text.lower() else "area")
             prob = MensurationProblem(
                 shape_type=GeometryShapeType.RECTANGLE,
                 measurements=[
@@ -259,10 +525,10 @@ class UniversalMathInterpreter:
                 "unknowns": [req_type],
                 "ast": {
                     "type": "eq",
-                    "left": {"type": "symbol", "name": "A"},
+                    "left": {"type": "symbol", "name": "A" if req_type == "area" else ("P" if req_type == "perimeter" else "d")},
                     "right": {"type": "mul", "args": [{"type": "number", "value": l}, {"type": "number", "value": w}]}
                 },
-                "latex": f"A = {int(l) if l.is_integer() else l} \\times {int(w) if w.is_integer() else w}"
+                "latex": f"A = {l_s} \\times {w_s}" if req_type == "area" else (f"P = 2({l_s} + {w_s})" if req_type == "perimeter" else f"d = \\sqrt{{{l_s}^2 + {w_s}^2}}")
             }
         return None
 
@@ -466,14 +732,21 @@ class UniversalMathInterpreter:
                     "unknowns": symbols or ["x"]
                 }
         except Exception:
-            # Fallback to general unknown
+            # Pedagogical clarification fallback instead of failure
             return {
                 "domain": "unknown",
                 "topic": "unknown",
                 "problem_type": "unknown",
                 "ast": None,
                 "latex": original,
-                "unknowns": []
+                "unknowns": [],
+                "is_ambiguous": True,
+                "clarification_question": f"I couldn't quite determine the exact math goal for '{original}'. What would you like to do?",
+                "clarification_options": [
+                    f"Solve {original} for x",
+                    f"Simplify {original}",
+                    f"Calculate value of {original}"
+                ]
             }
 
     def _expr_to_ast(self, expr: sp.Basic) -> Dict[str, Any]:

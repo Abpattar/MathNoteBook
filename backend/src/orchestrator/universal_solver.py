@@ -205,11 +205,43 @@ class UniversalSolver:
             for i, s in enumerate(raw_steps)
         ]
         final_ans = raw_steps[-1].final_answer_text if (raw_steps and raw_steps[-1].final_answer_text) else (raw_steps[-1].display_math if raw_steps else "Mensuration complete")
+        
+        # Build tailored SVG diagram based on shape type
+        st = interp.get("shape_type") or (prob.shape_type.value if hasattr(prob, "shape_type") else "rectangle")
+        if "tri" in st:
+            svg = (
+                f'<svg width="400" height="220" viewBox="0 0 400 220" xmlns="http://www.w3.org/2000/svg">'
+                f'<polygon points="200,30 340,175 60,175" stroke="#2563eb" stroke-width="3" fill="rgba(37,99,235,0.08)"/>'
+                f'<text x="200" y="205" text-anchor="middle" font-size="14" font-weight="bold" fill="#059669">{final_ans}</text>'
+                f'</svg>'
+            )
+        elif "square" in st:
+            svg = (
+                f'<svg width="400" height="220" viewBox="0 0 400 220" xmlns="http://www.w3.org/2000/svg">'
+                f'<rect x="130" y="25" width="140" height="140" stroke="#7c3aed" stroke-width="3" fill="rgba(124,58,237,0.08)"/>'
+                f'<text x="200" y="200" text-anchor="middle" font-size="14" font-weight="bold" fill="#059669">{final_ans}</text>'
+                f'</svg>'
+            )
+        elif "circle" in st:
+            svg = (
+                f'<svg width="400" height="220" viewBox="0 0 400 220" xmlns="http://www.w3.org/2000/svg">'
+                f'<circle cx="200" cy="95" r="65" stroke="#0284c7" stroke-width="3" fill="rgba(2,132,199,0.08)"/>'
+                f'<text x="200" y="195" text-anchor="middle" font-size="14" font-weight="bold" fill="#059669">{final_ans}</text>'
+                f'</svg>'
+            )
+        else:
+            svg = (
+                f'<svg width="400" height="220" viewBox="0 0 400 220" xmlns="http://www.w3.org/2000/svg">'
+                f'<rect x="80" y="35" width="240" height="120" stroke="#2563eb" stroke-width="3" fill="rgba(37,99,235,0.06)"/>'
+                f'<text x="200" y="195" text-anchor="middle" font-size="14" font-weight="bold" fill="#059669">{final_ans}</text>'
+                f'</svg>'
+            )
+
         return {
             "steps": step_payloads,
             "final_answer": final_ans,
             "visual_type": "mensuration_diagram",
-            "svg_diagram": f'<svg width="400" height="200"><rect x="80" y="40" width="240" height="120" stroke="#2563eb" stroke-width="2" fill="rgba(37,99,235,0.06)"/><text x="200" y="105" text-anchor="middle" font-size="15" font-weight="bold" fill="#1e293b">{final_ans}</text></svg>'
+            "svg_diagram": svg
         }
 
     def _solve_coordinate_geometry(self, interp: Dict[str, Any], grade: int) -> Dict[str, Any]:

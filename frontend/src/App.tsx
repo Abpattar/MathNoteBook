@@ -45,6 +45,11 @@ const DEFAULT_PROFILE: StudentProfile = {
   }
 };
 
+interface PedagogicalClarification {
+  question: string;
+  options: string[];
+}
+
 function App() {
   const [strokes, setStrokes] = useState<Stroke[]>(INITIAL_STROKES);
   const [redoStack, setRedoStack] = useState<Stroke[][]>([]);
@@ -60,6 +65,7 @@ function App() {
   const [activeTab, setActiveTab] = useState<ScreenTab>('canvas');
   const [isLoading, setIsLoading] = useState(false);
   const [notice, setNotice] = useState<{ message: string; type: 'info' | 'error' } | null>(null);
+  const [clarification, setClarification] = useState<PedagogicalClarification | null>(null);
 
   // Orchestrator State & Student Profile
   const [profile, setProfile] = useState<StudentProfile>(DEFAULT_PROFILE);
@@ -149,19 +155,21 @@ function App() {
     setSolutionSteps([]);
     setCurrentStep(0);
     setNotice(null);
+    setClarification(null);
     setUmr(null);
     setActiveTab('canvas');
   }, []);
 
-  const handleSolve = useCallback(async () => {
+  const handleSolve = useCallback(async (overrideText?: string | React.MouseEvent) => {
     if (recognizeAbortRef.current) recognizeAbortRef.current.abort();
 
-    const text = typedInput.trim();
+    const text = (typeof overrideText === 'string' ? overrideText : typedInput).trim();
     setNotice(null);
+    setClarification(null);
     setIsLoading(true);
 
     try {
-      const shouldSolveCanvas = lastActiveSource === 'canvas' ? strokes.length > 0 : (!text && strokes.length > 0);
+      const shouldSolveCanvas = overrideText ? false : (lastActiveSource === 'canvas' ? strokes.length > 0 : (!text && strokes.length > 0));
       let textToSolve = text;
       let imageB64: string | undefined = undefined;
 
@@ -186,6 +194,14 @@ function App() {
               if (recData.recognized_text) {
                 textToSolve = recData.recognized_text;
                 setTypedInput(recData.recognized_text);
+              }
+              if (recData.needs_clarification && recData.clarification && recData.clarification.options?.length > 0) {
+                setClarification({
+                  question: recData.clarification.question,
+                  options: recData.clarification.options.map((o: any) => o.label || o.value || o)
+                });
+                setIsLoading(false);
+                return;
               }
             }
           } catch {
@@ -226,9 +242,9 @@ function App() {
       setUmr(umrData);
 
       if (umrData.understanding.is_ambiguous) {
-        setNotice({
-          message: umrData.understanding.clarification_question || 'Could not clearly recognize the problem.',
-          type: 'error'
+        setClarification({
+          question: umrData.understanding.clarification_question || 'What would you like to calculate?',
+          options: umrData.understanding.clarification_options || []
         });
         setIsLoading(false);
         return;
@@ -277,7 +293,15 @@ function App() {
     } finally {
       setIsLoading(false);
     }
-  }, [typedInput, strokes, profile]);
+  }, [typedInput, strokes, profile, lastActiveSource]);
+
+  const handleClarificationSelect = useCallback((option: string) => {
+    setClarification(null);
+    setNotice(null);
+    setTypedInput(option);
+    setLastActiveSource('typed');
+    handleSolve(option);
+  }, [handleSolve]);
 
   const handleShowAll = useCallback(() => {
     setCurrentStep(solutionSteps.length);
@@ -409,8 +433,42 @@ function App() {
             </div>
           </div>
 
+          {/* Pedagogical Assistant Clarification Card */}
+          {clarification && (
+            <div className="clarification-card" role="region" aria-label="Teacher's Clarification">
+              <div className="clarification-header">
+                <span className="clarification-icon">💡</span>
+                <div className="clarification-title-wrap">
+                  <h3 className="clarification-title">Teacher's Clarification</h3>
+                  <p className="clarification-question">{clarification.question}</p>
+                </div>
+                <button
+                  className="screen-notice-close"
+                  onClick={() => setClarification(null)}
+                  aria-label="Dismiss clarification"
+                >
+                  ×
+                </button>
+              </div>
+              {clarification.options.length > 0 && (
+                <div className="clarification-options" role="group" aria-label="Suggested math goals">
+                  {clarification.options.map((opt, idx) => (
+                    <button
+                      key={idx}
+                      className="clarification-option-btn"
+                      onClick={() => handleClarificationSelect(opt)}
+                    >
+                      <span className="clarification-bullet">➔</span>
+                      <span>{opt}</span>
+                    </button>
+                  ))}
+                </div>
+              )}
+            </div>
+          )}
+
           {/* Inline Guidance Notice */}
-          {notice && (
+          {notice && !clarification && (
             <div className={`screen-notice ${notice.type}`} role="alert">
               <span>{notice.message}</span>
               <button
@@ -560,7 +618,7 @@ function App() {
 
           <button
             className="solve-btn"
-            onClick={handleSolve}
+            onClick={() => handleSolve()}
             disabled={isLoading}
             aria-label="Solve math problem"
           >
