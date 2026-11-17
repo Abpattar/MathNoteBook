@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import './visualizations.css';
 
 interface EquationBalanceProps {
@@ -12,10 +12,17 @@ export const EquationBalanceVisualizer: React.FC<EquationBalanceProps> = ({
   initialB = 3,
   initialC = 7
 }) => {
-  const [a] = useState(initialA);
-  const [b] = useState(initialB);
-  const [c] = useState(initialC);
+  const [a, setA] = useState(initialA);
+  const [b, setB] = useState(initialB);
+  const [c, setC] = useState(initialC);
   const [step, setStep] = useState(0);
+
+  useEffect(() => {
+    setA(initialA);
+    setB(initialB);
+    setC(initialC);
+    setStep(0);
+  }, [initialA, initialB, initialC]);
 
   const solutionX = a !== 0 ? (c - b) / a : 0;
 

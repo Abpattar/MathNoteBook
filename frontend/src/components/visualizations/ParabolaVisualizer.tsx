@@ -18,6 +18,12 @@ export const ParabolaVisualizer: React.FC<ParabolaVisualizerProps> = ({
   const [b, setB] = useState<number>(initialB);
   const [c, setC] = useState<number>(initialC);
 
+  useEffect(() => {
+    setA(initialA);
+    setB(initialB);
+    setC(initialC);
+  }, [initialA, initialB, initialC]);
+
   const canvasRef = useRef<HTMLCanvasElement | null>(null);
 
   const discriminant = b * b - 4 * a * c;

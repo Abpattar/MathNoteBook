@@ -17,6 +17,11 @@ export const PythagoreanVisualizer: React.FC<PythagoreanVisualizerProps> = ({
   const [b, setB] = useState<number>(initialB);
   const [showGrid, setShowGrid] = useState<boolean>(true);
 
+  useEffect(() => {
+    setA(initialA);
+    setB(initialB);
+  }, [initialA, initialB]);
+
   const a2 = a * a;
   const b2 = b * b;
   const c2 = a2 + b2;

@@ -12,12 +12,14 @@ export interface Stroke {
   color: string;
   width: number;
   timestamp: number;
+  shapeId?: string;
+  shapeType?: string;
 }
 
 export interface CanvasState {
   strokes: Stroke[];
   historyIndex: number;
-  currentTool: 'pen' | 'eraser';
+  currentTool: 'pen' | 'eraser' | 'select';
   penColor: string;
   penWidth: number;
   eraserWidth: number;
@@ -29,7 +31,7 @@ export interface CanvasActions {
   undo: () => void;
   redo: () => void;
   clear: () => void;
-  setTool: (tool: 'pen' | 'eraser') => void;
+  setTool: (tool: 'pen' | 'eraser' | 'select') => void;
   setPenColor: (color: string) => void;
   setPenWidth: (width: number) => void;
   setEraserWidth: (width: number) => void;

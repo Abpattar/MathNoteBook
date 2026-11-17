@@ -58,7 +58,7 @@ function App() {
   const [typedInput, setTypedInput] = useState('');
   const [lastActiveSource, setLastActiveSource] = useState<'canvas' | 'typed'>('canvas');
   const [mode, setMode] = useState<DisplayMode>('notebook');
-  const [tool, setTool] = useState<'pen' | 'eraser'>('pen');
+  const [tool, setTool] = useState<'pen' | 'eraser' | 'select'>('pen');
   const [penColor] = useState('#000000');
   const [penWidth] = useState(2);
   const [eraserWidth] = useState(20);
@@ -244,6 +244,25 @@ function App() {
     soundEffects.playClick(500, 0.06);
   }, []);
 
+  const handleSignDeleteLast = useCallback(() => {
+    setTypedInput(prev => {
+      if (!prev) return '';
+      const trimmed = prev.trimEnd();
+      const parts = trimmed.split(/\s+/);
+      if (parts.length > 1) {
+        parts.pop();
+        return parts.join(' ');
+      }
+      return '';
+    });
+    soundEffects.playClick(440, 0.06);
+  }, []);
+
+  const handleSignClear = useCallback(() => {
+    setTypedInput('');
+    soundEffects.playClick(320, 0.08);
+  }, []);
+
   const handleSolve = useCallback(async (overrideText?: string | React.MouseEvent) => {
     if (recognizeAbortRef.current) recognizeAbortRef.current.abort();
 
@@ -366,6 +385,10 @@ function App() {
           setVisualMode('parabola');
         } else if (orchData.visualisation?.type === 'equation_balance') {
           setVisualMode('balance');
+        } else if (orchData.visualisation?.type === 'circle_exhaustion') {
+          setVisualMode('circle');
+        } else if (orchData.visualisation?.type === 'pythagoras') {
+          setVisualMode('pythagoras');
         } else if (orchData.understanding?.topic === 'geometry' || orchData.visualisation?.type === 'geometry_diagram' || orchData.visualisation?.type === 'svg_diagram') {
           setVisualMode('geometry');
         }
@@ -712,42 +735,48 @@ function App() {
 
               {visualMode === 'parabola' && (
                 <ParabolaVisualizer
-                  initialA={umr?.visualisation?.initial_params?.a || 1}
-                  initialB={umr?.visualisation?.initial_params?.b || 5}
-                  initialC={umr?.visualisation?.initial_params?.c || 6}
+                  key={`${umr?.problem_id || 'default'}-parabola`}
+                  initialA={umr?.visualisation?.initial_params?.a !== undefined ? umr.visualisation.initial_params.a : 1}
+                  initialB={umr?.visualisation?.initial_params?.b !== undefined ? umr.visualisation.initial_params.b : 0}
+                  initialC={umr?.visualisation?.initial_params?.c !== undefined ? umr.visualisation.initial_params.c : -4}
                 />
               )}
 
               {visualMode === 'balance' && (
                 <EquationBalanceVisualizer
-                  initialA={umr?.visualisation?.initial_params?.a || 2}
-                  initialB={umr?.visualisation?.initial_params?.b || 3}
-                  initialC={umr?.visualisation?.initial_params?.c || 7}
+                  key={`${umr?.problem_id || 'default'}-balance`}
+                  initialA={umr?.visualisation?.initial_params?.a !== undefined ? umr.visualisation.initial_params.a : 2}
+                  initialB={umr?.visualisation?.initial_params?.b !== undefined ? umr.visualisation.initial_params.b : 3}
+                  initialC={umr?.visualisation?.initial_params?.c !== undefined ? umr.visualisation.initial_params.c : 7}
                 />
               )}
 
               {visualMode === 'circle' && (
                 <CircleAreaExhaustionVisualizer
-                  radius={5}
+                  key={`${umr?.problem_id || 'default'}-circle`}
+                  radius={umr?.visualisation?.initial_params?.radius !== undefined ? umr.visualisation.initial_params.radius : 5}
                 />
               )}
 
               {visualMode === 'pythagoras' && (
                 <PythagoreanVisualizer
-                  initialA={3}
-                  initialB={4}
+                  key={`${umr?.problem_id || 'default'}-pythagoras`}
+                  initialA={umr?.visualisation?.initial_params?.a !== undefined ? umr.visualisation.initial_params.a : 3}
+                  initialB={umr?.visualisation?.initial_params?.b !== undefined ? umr.visualisation.initial_params.b : 4}
                 />
               )}
 
               {visualMode === 'numberline' && (
                 <NumberLineVisualizer
-                  initialA={2}
-                  initialB={3}
+                  key={`${umr?.problem_id || 'default'}-numberline`}
+                  initialA={umr?.visualisation?.initial_params?.a !== undefined ? umr.visualisation.initial_params.a : 2}
+                  initialB={umr?.visualisation?.initial_params?.b !== undefined ? umr.visualisation.initial_params.b : 3}
                 />
               )}
 
               {visualMode === 'tiles' && (
                 <AlgebraTilesVisualizer
+                  key={`${umr?.problem_id || 'default'}-tiles`}
                   initialP={2}
                   initialQ={3}
                 />
@@ -755,6 +784,7 @@ function App() {
 
               {visualMode === 'geometry' && (
                 <GeometryDiagramVisualizer
+                  key={`${umr?.problem_id || 'default'}-geometry`}
                   svgCode={umr?.visualisation?.initial_params?.svg_code}
                   topic={umr?.visualisation?.initial_params?.topic || umr?.understanding?.topic || 'geometry'}
                   description={umr?.visualisation?.description}
@@ -841,6 +871,9 @@ function App() {
         isOpen={isSignModalOpen}
         onClose={() => setIsSignModalOpen(false)}
         onRecognizedSign={handleSignRecognized}
+        onDeleteLastSign={handleSignDeleteLast}
+        onClearSigns={handleSignClear}
+        currentInput={typedInput}
       />
 
       <footer className="app-footer">

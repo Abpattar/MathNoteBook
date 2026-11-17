@@ -14,6 +14,11 @@ export const AlgebraTilesVisualizer: React.FC<AlgebraTilesVisualizerProps> = ({
 }) => {
   const [p, setP] = useState<number>(initialP);
   const [q, setQ] = useState<number>(initialQ);
+
+  useEffect(() => {
+    setP(initialP);
+    setQ(initialQ);
+  }, [initialP, initialQ]);
   const canvasRef = useRef<HTMLCanvasElement | null>(null);
 
   // Sound feedback on slider change

@@ -17,6 +17,11 @@ export const NumberLineVisualizer: React.FC<NumberLineVisualizerProps> = ({
   const [b, setB] = useState<number>(initialB);
   const sum = a + b;
 
+  useEffect(() => {
+    setA(initialA);
+    setB(initialB);
+  }, [initialA, initialB]);
+
   const draw = useCallback(() => {
     const canvas = canvasRef.current;
     if (!canvas) return;

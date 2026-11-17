@@ -5,6 +5,9 @@ interface LiveISLRecognitionModalProps {
   isOpen: boolean;
   onClose: () => void;
   onRecognizedSign: (sign: string) => void;
+  onDeleteLastSign?: () => void;
+  onClearSigns?: () => void;
+  currentInput?: string;
 }
 
 const NEON_BONES = [
@@ -19,7 +22,10 @@ const NEON_BONES = [
 export const LiveISLRecognitionModal: React.FC<LiveISLRecognitionModalProps> = ({
   isOpen,
   onClose,
-  onRecognizedSign
+  onRecognizedSign,
+  onDeleteLastSign,
+  onClearSigns,
+  currentInput = ''
 }) => {
   const videoRef = useRef<HTMLVideoElement>(null);
   const canvasRef = useRef<HTMLCanvasElement>(null);
@@ -307,7 +313,31 @@ export const LiveISLRecognitionModal: React.FC<LiveISLRecognitionModalProps> = (
     if (detectedSign && detectedSign !== 'Ready' && detectedSign !== 'Hold gesture...') {
       soundEffects.playClick(680, 0.08);
       onRecognizedSign(detectedSign);
-      setRecentSigns((prev) => [...prev.slice(-8), detectedSign]);
+      setRecentSigns((prev) => [...prev.slice(-15), detectedSign]);
+    }
+  };
+
+  const handleDeleteLast = () => {
+    soundEffects.playClick(440, 0.06);
+    setRecentSigns((prev) => prev.slice(0, -1));
+    if (onDeleteLastSign) {
+      onDeleteLastSign();
+    }
+  };
+
+  const handleClearAll = () => {
+    soundEffects.playClick(320, 0.08);
+    setRecentSigns([]);
+    if (onClearSigns) {
+      onClearSigns();
+    }
+  };
+
+  const handleDeleteAtIndex = (index: number) => {
+    soundEffects.playClick(440, 0.06);
+    setRecentSigns((prev) => prev.filter((_, i) => i !== index));
+    if (onDeleteLastSign) {
+      onDeleteLastSign();
     }
   };
 
@@ -351,7 +381,7 @@ export const LiveISLRecognitionModal: React.FC<LiveISLRecognitionModalProps> = (
             />
 
             {/* Live Recognition HUD */}
-            <div style={{ position: 'absolute', bottom: '12px', left: '12px', right: '12px', display: 'flex', justifyContent: 'space-between', alignItems: 'center', background: 'rgba(15, 23, 42, 0.85)', padding: '8px 14px', borderRadius: '8px', border: '1px solid #334155' }}>
+            <div style={{ position: 'absolute', bottom: '12px', left: '12px', right: '12px', display: 'flex', justifyContent: 'space-between', alignItems: 'center', background: 'rgba(15, 23, 42, 0.88)', padding: '8px 14px', borderRadius: '8px', border: '1px solid #334155' }}>
               <div>
                 <span style={{ fontSize: '11px', color: '#94a3b8', display: 'block' }}>RECOGNIZED SIGN</span>
                 <span style={{ fontSize: '20px', fontWeight: 700, color: '#4cebd8', fontFamily: 'monospace' }}>
@@ -366,6 +396,27 @@ export const LiveISLRecognitionModal: React.FC<LiveISLRecognitionModalProps> = (
 
               <div style={{ display: 'flex', gap: '8px', alignItems: 'center' }}>
                 <button
+                  type="button"
+                  onClick={handleDeleteLast}
+                  style={{
+                    background: '#334155',
+                    color: '#f8fafc',
+                    border: '1px solid #475569',
+                    padding: '8px 12px',
+                    borderRadius: '6px',
+                    fontWeight: 600,
+                    cursor: 'pointer',
+                    fontSize: '13px',
+                    display: 'flex',
+                    alignItems: 'center',
+                    gap: '4px'
+                  }}
+                  title="Delete last inserted sign (Backspace)"
+                >
+                  ⌫ Backspace
+                </button>
+                <button
+                  type="button"
                   onClick={handleManualInsert}
                   disabled={!detectedSign || detectedSign === 'Ready' || detectedSign === 'Hold gesture...'}
                   style={{
@@ -392,36 +443,93 @@ export const LiveISLRecognitionModal: React.FC<LiveISLRecognitionModalProps> = (
             <span style={{ fontSize: '11px', color: '#94a3b8', textTransform: 'uppercase', fontWeight: 600 }}>
               Recognized Expression Stream
             </span>
-            <label style={{ fontSize: '12px', color: '#cbd5e1', display: 'flex', alignItems: 'center', gap: '6px', cursor: 'pointer' }}>
-              <input
-                type="checkbox"
-                checked={autoInsert}
-                onChange={(e) => setAutoInsert(e.target.checked)}
-              />
-              Auto-insert on gesture hold
-            </label>
+            <div style={{ display: 'flex', gap: '12px', alignItems: 'center' }}>
+              {recentSigns.length > 0 && (
+                <button
+                  type="button"
+                  onClick={handleClearAll}
+                  style={{
+                    background: 'transparent',
+                    border: 'none',
+                    color: '#f87171',
+                    fontSize: '11px',
+                    cursor: 'pointer',
+                    textDecoration: 'underline',
+                    padding: 0
+                  }}
+                  title="Clear all recognized signs"
+                >
+                  🗑️ Clear Stream
+                </button>
+              )}
+              <label style={{ fontSize: '12px', color: '#cbd5e1', display: 'flex', alignItems: 'center', gap: '6px', cursor: 'pointer' }}>
+                <input
+                  type="checkbox"
+                  checked={autoInsert}
+                  onChange={(e) => setAutoInsert(e.target.checked)}
+                />
+                Auto-insert on hold
+              </label>
+            </div>
           </div>
 
-          <div style={{ display: 'flex', gap: '8px', flexWrap: 'wrap', minHeight: '32px', background: '#1e293b', padding: '6px 10px', borderRadius: '6px' }}>
+          <div style={{ display: 'flex', gap: '6px', flexWrap: 'wrap', minHeight: '34px', background: '#1e293b', padding: '6px 10px', borderRadius: '6px', alignItems: 'center' }}>
             {recentSigns.length === 0 ? (
-              <span style={{ fontSize: '12px', color: '#64748b' }}>No symbols captured yet. Make a sign to begin.</span>
+              <span style={{ fontSize: '12px', color: '#64748b' }}>No symbols captured yet. Make a sign or click ➕ to begin.</span>
             ) : (
               recentSigns.map((s, idx) => (
                 <span
                   key={idx}
-                  style={{ background: '#047857', color: '#fff', padding: '2px 8px', borderRadius: '4px', fontSize: '13px', fontWeight: 700, fontFamily: 'monospace' }}
+                  style={{
+                    background: '#047857',
+                    color: '#fff',
+                    padding: '2px 8px',
+                    borderRadius: '4px',
+                    fontSize: '13px',
+                    fontWeight: 700,
+                    fontFamily: 'monospace',
+                    display: 'inline-flex',
+                    alignItems: 'center',
+                    gap: '6px'
+                  }}
                 >
                   {s}
+                  <button
+                    type="button"
+                    onClick={() => handleDeleteAtIndex(idx)}
+                    style={{
+                      background: 'rgba(0,0,0,0.3)',
+                      border: 'none',
+                      color: '#fecaca',
+                      borderRadius: '50%',
+                      width: '14px',
+                      height: '14px',
+                      lineHeight: '14px',
+                      padding: 0,
+                      cursor: 'pointer',
+                      fontSize: '10px'
+                    }}
+                    title="Remove this token"
+                  >
+                    ×
+                  </button>
                 </span>
               ))
             )}
           </div>
         </div>
 
-        <div style={{ marginTop: '14px', textAlign: 'right' }}>
+        {/* Current Expression Preview & Footer */}
+        <div style={{ marginTop: '12px', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+          <div style={{ fontSize: '12px', color: '#94a3b8' }}>
+            Current Input:{' '}
+            <span style={{ fontFamily: 'monospace', color: '#f8fafc', fontWeight: 600 }}>
+              {currentInput || '(empty)'}
+            </span>
+          </div>
           <button
             onClick={onClose}
-            style={{ background: '#334155', color: '#f8fafc', border: 'none', padding: '6px 16px', borderRadius: '6px', cursor: 'pointer' }}
+            style={{ background: '#3b82f6', color: '#ffffff', border: 'none', padding: '7px 18px', borderRadius: '6px', cursor: 'pointer', fontWeight: 600, fontSize: '13px' }}
           >
             Done
           </button>

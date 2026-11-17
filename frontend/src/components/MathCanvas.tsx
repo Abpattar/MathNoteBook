@@ -6,11 +6,11 @@ import '../styles/canvas.css';
 interface MathCanvasProps {
   strokes: Stroke[];
   onStrokesChange: (strokes: Stroke[]) => void;
-  tool: 'pen' | 'eraser';
+  tool: 'pen' | 'eraser' | 'select';
   penColor: string;
   penWidth: number;
   eraserWidth: number;
-  onToolChange: (tool: 'pen' | 'eraser') => void;
+  onToolChange: (tool: 'pen' | 'eraser' | 'select') => void;
   onUndo: () => void;
   onRedo: () => void;
   onClear: () => void;
@@ -42,6 +42,10 @@ export function MathCanvas({
   const [containerSize, setContainerSize] = useState({ width: 0, height: 0 });
   const [isDrawing, setIsDrawing] = useState(false);
   const [isShapeMenuOpen, setIsShapeMenuOpen] = useState(false);
+  const [selectedShapeId, setSelectedShapeId] = useState<string | null>(null);
+  const [isDraggingShape, setIsDraggingShape] = useState<boolean>(false);
+  const [hoveredShapeId, setHoveredShapeId] = useState<string | null>(null);
+  const dragStartRef = useRef<{ x: number; y: number } | null>(null);
   const shapeMenuRef = useRef<HTMLDivElement>(null);
   const currentStrokeRef = useRef<{ x: number; y: number; pressure?: number; timestamp: number }[]>([]);
   const strokeIdRef = useRef(0);
@@ -118,30 +122,75 @@ export function MathCanvas({
     }
   }, [onExportCanvas]);
 
+  // Helper to compute bounding box of a shape or single stroke
+  const getShapeBoundingBox = useCallback((targetId: string) => {
+    let minX = Infinity, minY = Infinity, maxX = -Infinity, maxY = -Infinity;
+    let found = false;
+    for (const s of strokesRef.current) {
+      if (s.shapeId === targetId || s.id === targetId) {
+        for (const p of s.points) {
+          if (p.x < minX) minX = p.x;
+          if (p.y < minY) minY = p.y;
+          if (p.x > maxX) maxX = p.x;
+          if (p.y > maxY) maxY = p.y;
+          found = true;
+        }
+      }
+    }
+    if (!found) return null;
+    return { minX, minY, maxX, maxY, w: maxX - minX, h: maxY - minY };
+  }, []);
+
+  const findShapeAtPoint = useCallback((px: number, py: number): string | null => {
+    const shapeIds = Array.from(new Set(strokesRef.current.map(s => s.shapeId).filter(Boolean))) as string[];
+    for (const sid of shapeIds) {
+      const box = getShapeBoundingBox(sid);
+      if (box) {
+        const margin = 16;
+        if (px >= box.minX - margin && px <= box.maxX + margin &&
+            py >= box.minY - margin && py <= box.maxY + margin) {
+          return sid;
+        }
+      }
+    }
+    for (const s of strokesRef.current) {
+      for (const p of s.points) {
+        if (Math.hypot(p.x - px, p.y - py) <= 20) {
+          return s.shapeId || s.id;
+        }
+      }
+    }
+    return null;
+  }, [getShapeBoundingBox]);
+
+  const deleteSelectedShape = useCallback(() => {
+    if (!selectedShapeId) return;
+    const remaining = strokes.filter(s => s.shapeId !== selectedShapeId && s.id !== selectedShapeId);
+    onStrokesChange(remaining);
+    setSelectedShapeId(null);
+  }, [selectedShapeId, strokes, onStrokesChange]);
+
   useEffect(() => {
     const canvas = canvasRef.current;
     if (!canvas) return;
 
-    const ctx = canvas.getContext('2d');
-    if (!ctx) return;
-
-    ctxRef.current = ctx;
-    ctx.lineCap = 'round';
-    ctx.lineJoin = 'round';
-
     const resize = () => {
-      const container = canvas.parentElement;
+      const container = canvasContainerRef.current;
       if (!container) return;
 
       const rect = container.getBoundingClientRect();
+      const scale = window.devicePixelRatio || 1;
       const width = rect.width;
       const height = rect.height;
 
-      const scale = window.devicePixelRatio || 1;
       canvas.width = width * scale;
       canvas.height = height * scale;
       canvas.style.width = `${width}px`;
       canvas.style.height = `${height}px`;
+
+      const ctx = canvas.getContext('2d');
+      if (!ctx) return;
+      ctxRef.current = ctx;
 
       ctx.scale(scale, scale);
       setContainerSize(prev => (prev.width === width && prev.height === height ? prev : { width, height }));
@@ -162,6 +211,52 @@ export function MathCanvas({
         if (stroke.points.length < 2) continue;
         drawStroke(ctx, stroke);
       }
+
+      // Draw bounding box if shape/stroke is selected
+      if (selectedShapeId) {
+        const box = getShapeBoundingBox(selectedShapeId);
+        if (box) {
+          ctx.save();
+          ctx.strokeStyle = '#0284c7';
+          ctx.lineWidth = 1.5;
+          ctx.setLineDash([5, 4]);
+          const pad = 10;
+          ctx.strokeRect(box.minX - pad, box.minY - pad, box.w + pad * 2, box.h + pad * 2);
+          ctx.setLineDash([]);
+
+          // Draw move badge at top of box
+          const badgeText = '✥ Drag to Move Shape';
+          ctx.font = 'bold 11px system-ui, -apple-system, sans-serif';
+          const textW = ctx.measureText(badgeText).width;
+          const badgeX = box.minX - pad + (box.w + pad * 2) / 2 - (textW + 16) / 2;
+          const badgeY = Math.max(4, box.minY - pad - 22);
+
+          ctx.fillStyle = '#0284c7';
+          ctx.beginPath();
+          ctx.roundRect(badgeX, badgeY, textW + 16, 18, 4);
+          ctx.fill();
+
+          ctx.fillStyle = '#ffffff';
+          ctx.fillText(badgeText, badgeX + 8, badgeY + 13);
+
+          // Draw corner dots
+          const corners = [
+            [box.minX - pad, box.minY - pad],
+            [box.maxX + pad, box.minY - pad],
+            [box.minX - pad, box.maxY + pad],
+            [box.maxX + pad, box.maxY + pad],
+          ];
+          ctx.fillStyle = '#38bdf8';
+          corners.forEach(([cx, cy]) => {
+            ctx.beginPath();
+            ctx.arc(cx, cy, 4, 0, Math.PI * 2);
+            ctx.fill();
+            ctx.strokeStyle = '#0369a1';
+            ctx.stroke();
+          });
+          ctx.restore();
+        }
+      }
     };
 
     const drawStroke = (ctx: CanvasRenderingContext2D, stroke: Stroke) => {
@@ -179,7 +274,7 @@ export function MathCanvas({
     resize();
     window.addEventListener('resize', resize);
     return () => window.removeEventListener('resize', resize);
-  }, [strokes]);
+  }, [strokes, selectedShapeId, getShapeBoundingBox]);
 
   const getCanvasPoint = useCallback((event: React.PointerEvent | PointerEvent) => {
     const canvas = canvasRef.current;
@@ -203,18 +298,63 @@ export function MathCanvas({
     if (!canvas) return;
 
     event.preventDefault();
+    const point = getCanvasPoint(event);
+
+    if (tool === 'select') {
+      const targetId = findShapeAtPoint(point.x, point.y);
+      if (targetId) {
+        setSelectedShapeId(targetId);
+        setIsDraggingShape(true);
+        dragStartRef.current = { x: point.x, y: point.y };
+        canvas.setPointerCapture(event.pointerId);
+      } else {
+        setSelectedShapeId(null);
+      }
+      return;
+    }
+
     canvas.setPointerCapture(event.pointerId);
     setIsDrawing(true);
-
-    const point = getCanvasPoint(event);
     currentStrokeRef.current = [point];
     strokeIdRef.current = Date.now();
-  }, [disabled, getCanvasPoint]);
+  }, [disabled, tool, getCanvasPoint, findShapeAtPoint]);
 
   const handlePointerMove = useCallback((event: React.PointerEvent) => {
-    if (!isDrawing || disabled) return;
+    if (disabled) return;
 
+    const canvas = canvasRef.current;
+    if (!canvas) return;
     const point = getCanvasPoint(event);
+
+    if (tool === 'select') {
+      if (isDraggingShape && dragStartRef.current && selectedShapeId) {
+        const dx = point.x - dragStartRef.current.x;
+        const dy = point.y - dragStartRef.current.y;
+        dragStartRef.current = { x: point.x, y: point.y };
+
+        const updated = strokesRef.current.map(s => {
+          if (s.shapeId === selectedShapeId || s.id === selectedShapeId) {
+            return {
+              ...s,
+              points: s.points.map(p => ({
+                ...p,
+                x: p.x + dx,
+                y: p.y + dy
+              }))
+            };
+          }
+          return s;
+        });
+        onStrokesChange(updated);
+      } else {
+        const hovered = findShapeAtPoint(point.x, point.y);
+        setHoveredShapeId(hovered);
+      }
+      return;
+    }
+
+    if (!isDrawing) return;
+
     currentStrokeRef.current.push(point);
 
     const ctx = ctxRef.current;
@@ -229,12 +369,27 @@ export function MathCanvas({
     ctx.moveTo(prevPoint.x, prevPoint.y);
     ctx.lineTo(point.x, point.y);
     ctx.stroke();
-  }, [isDrawing, disabled, tool, penColor, penWidth, eraserWidth, getCanvasPoint]);
+  }, [disabled, tool, isDraggingShape, selectedShapeId, onStrokesChange, findShapeAtPoint, isDrawing, penColor, eraserWidth, penWidth, getCanvasPoint]);
 
   const handlePointerUp = useCallback((event: React.PointerEvent) => {
-    if (!isDrawing || disabled) return;
+    if (disabled) return;
 
     const canvas = canvasRef.current;
+    if (tool === 'select') {
+      if (isDraggingShape) {
+        setIsDraggingShape(false);
+        dragStartRef.current = null;
+        if (canvas) {
+          try {
+            canvas.releasePointerCapture(event.pointerId);
+          } catch {}
+        }
+      }
+      return;
+    }
+
+    if (!isDrawing) return;
+
     if (canvas) {
       canvas.releasePointerCapture(event.pointerId);
     }
@@ -255,7 +410,7 @@ export function MathCanvas({
 
     currentStrokeRef.current = [];
     redraw();
-  }, [isDrawing, disabled, tool, penColor, penWidth, eraserWidth, strokes, onStrokesChange]);
+  }, [disabled, tool, isDraggingShape, isDrawing, penColor, eraserWidth, penWidth, strokes, onStrokesChange]);
 
   const redraw = useCallback(() => {
     const canvas = canvasRef.current;
@@ -278,10 +433,68 @@ export function MathCanvas({
       }
       ctx.stroke();
     }
-  }, [strokes, containerSize]);
+
+    // Draw selection bounding box if active
+    if (selectedShapeId) {
+      const box = getShapeBoundingBox(selectedShapeId);
+      if (box) {
+        ctx.save();
+        ctx.strokeStyle = '#0284c7';
+        ctx.lineWidth = 1.5;
+        ctx.setLineDash([5, 4]);
+        const pad = 10;
+        ctx.strokeRect(box.minX - pad, box.minY - pad, box.w + pad * 2, box.h + pad * 2);
+        ctx.setLineDash([]);
+
+        const badgeText = '✥ Drag to Move Shape';
+        ctx.font = 'bold 11px system-ui, -apple-system, sans-serif';
+        const textW = ctx.measureText(badgeText).width;
+        const badgeX = box.minX - pad + (box.w + pad * 2) / 2 - (textW + 16) / 2;
+        const badgeY = Math.max(4, box.minY - pad - 22);
+
+        ctx.fillStyle = '#0284c7';
+        ctx.beginPath();
+        ctx.roundRect(badgeX, badgeY, textW + 16, 18, 4);
+        ctx.fill();
+
+        ctx.fillStyle = '#ffffff';
+        ctx.fillText(badgeText, badgeX + 8, badgeY + 13);
+
+        const corners = [
+          [box.minX - pad, box.minY - pad],
+          [box.maxX + pad, box.minY - pad],
+          [box.minX - pad, box.maxY + pad],
+          [box.maxX + pad, box.maxY + pad],
+        ];
+        ctx.fillStyle = '#38bdf8';
+        corners.forEach(([cx, cy]) => {
+          ctx.beginPath();
+          ctx.arc(cx, cy, 4, 0, Math.PI * 2);
+          ctx.fill();
+          ctx.strokeStyle = '#0369a1';
+          ctx.stroke();
+        });
+        ctx.restore();
+      }
+    }
+  }, [strokes, containerSize, selectedShapeId, getShapeBoundingBox]);
 
   const handleKeyDown = useCallback((event: KeyboardEvent) => {
     if (disabled) return;
+
+    if (event.key === 'Delete' || event.key === 'Backspace') {
+      if (selectedShapeId && tool === 'select') {
+        deleteSelectedShape();
+      }
+    }
+
+    if (event.key === 'm' || event.key === 'M' || event.key === 'v' || event.key === 'V') {
+      onToolChange('select');
+    } else if (event.key === 'p' || event.key === 'P') {
+      onToolChange('pen');
+    } else if (event.key === 'e' || event.key === 'E') {
+      onToolChange('eraser');
+    }
 
     if ((event.ctrlKey || event.metaKey) && event.key === 'z') {
       if (event.shiftKey) {
@@ -290,7 +503,7 @@ export function MathCanvas({
         onUndo();
       }
     }
-  }, [disabled, onUndo, onRedo]);
+  }, [disabled, selectedShapeId, tool, deleteSelectedShape, onToolChange, onUndo, onRedo]);
 
   useEffect(() => {
     const handleClickOutside = (e: MouseEvent) => {
@@ -312,15 +525,34 @@ export function MathCanvas({
     const cx = Math.round(cw / 2);
     const cy = Math.round(ch / 2);
     const now = Date.now();
+    const shapeId = `shape-${type}-${now}`;
+
+    // Offset consecutive shapes so they never overlap in center
+    const existingShapes = Array.from(new Set(strokes.map(s => s.shapeId).filter(Boolean)));
+    const hasCenterStrokes = strokes.some(s => s.points.some(p => Math.abs(p.x - cx) < 80 && Math.abs(p.y - cy) < 80));
+
+    let shapeCx = cx;
+    let shapeCy = cy;
+    if (hasCenterStrokes || existingShapes.length > 0) {
+      const idx = existingShapes.length + 1;
+      const col = (idx % 2 === 1) ? 1 : -1;
+      const step = Math.ceil(idx / 2) * 150;
+      shapeCx = Math.max(120, Math.min(cw - 120, cx + col * step));
+      if (shapeCx <= 120 || shapeCx >= cw - 120) {
+        shapeCy = Math.max(90, Math.min(ch - 90, cy + ((idx % 3 === 0) ? -90 : 90)));
+      }
+    }
 
     const newStrokes: Stroke[] = [];
 
     if (type === 'right_triangle') {
-      const x0 = cx - 90, y0 = cy + 60;
-      const x1 = cx + 90, y1 = cy + 60;
-      const x2 = cx - 90, y2 = cy - 65;
+      const x0 = shapeCx - 80, y0 = shapeCy + 55;
+      const x1 = shapeCx + 80, y1 = shapeCy + 55;
+      const x2 = shapeCx - 80, y2 = shapeCy - 60;
       newStrokes.push({
         id: `stroke-shape-${now}-1`,
+        shapeId,
+        shapeType: type,
         points: [
           { x: x0, y: y0, timestamp: now },
           { x: x1, y: y1, timestamp: now + 5 },
@@ -332,9 +564,11 @@ export function MathCanvas({
         width: penWidth,
         timestamp: now
       });
-      const sq = 18;
+      const sq = 16;
       newStrokes.push({
         id: `stroke-shape-${now}-2`,
+        shapeId,
+        shapeType: type,
         points: [
           { x: x0, y: y0 - sq, timestamp: now + 20 },
           { x: x0 + sq, y: y0 - sq, timestamp: now + 25 },
@@ -346,11 +580,13 @@ export function MathCanvas({
         timestamp: now + 20
       });
     } else if (type === 'triangle') {
-      const topX = cx, topY = cy - 70;
-      const brX = cx + 85, brY = cy + 70;
-      const blX = cx - 85, blY = cy + 70;
+      const topX = shapeCx, topY = shapeCy - 65;
+      const brX = shapeCx + 75, brY = shapeCy + 65;
+      const blX = shapeCx - 75, blY = shapeCy + 65;
       newStrokes.push({
         id: `stroke-shape-${now}-1`,
+        shapeId,
+        shapeType: type,
         points: [
           { x: topX, y: topY, timestamp: now },
           { x: brX, y: brY, timestamp: now + 5 },
@@ -363,16 +599,18 @@ export function MathCanvas({
         timestamp: now
       });
     } else if (type === 'square') {
-      const s = 130;
+      const s = 110;
       const half = s / 2;
       newStrokes.push({
         id: `stroke-shape-${now}-1`,
+        shapeId,
+        shapeType: type,
         points: [
-          { x: cx - half, y: cy - half, timestamp: now },
-          { x: cx + half, y: cy - half, timestamp: now + 5 },
-          { x: cx + half, y: cy + half, timestamp: now + 10 },
-          { x: cx - half, y: cy + half, timestamp: now + 15 },
-          { x: cx - half, y: cy - half, timestamp: now + 20 },
+          { x: shapeCx - half, y: shapeCy - half, timestamp: now },
+          { x: shapeCx + half, y: shapeCy - half, timestamp: now + 5 },
+          { x: shapeCx + half, y: shapeCy + half, timestamp: now + 10 },
+          { x: shapeCx - half, y: shapeCy + half, timestamp: now + 15 },
+          { x: shapeCx - half, y: shapeCy - half, timestamp: now + 20 },
         ],
         tool: 'pen',
         color: penColor,
@@ -380,15 +618,17 @@ export function MathCanvas({
         timestamp: now
       });
     } else if (type === 'rectangle') {
-      const hw = 95, hh = 55;
+      const hw = 85, hh = 50;
       newStrokes.push({
         id: `stroke-shape-${now}-1`,
+        shapeId,
+        shapeType: type,
         points: [
-          { x: cx - hw, y: cy - hh, timestamp: now },
-          { x: cx + hw, y: cy - hh, timestamp: now + 5 },
-          { x: cx + hw, y: cy + hh, timestamp: now + 10 },
-          { x: cx - hw, y: cy + hh, timestamp: now + 15 },
-          { x: cx - hw, y: cy - hh, timestamp: now + 20 },
+          { x: shapeCx - hw, y: shapeCy - hh, timestamp: now },
+          { x: shapeCx + hw, y: shapeCy - hh, timestamp: now + 5 },
+          { x: shapeCx + hw, y: shapeCy + hh, timestamp: now + 10 },
+          { x: shapeCx - hw, y: shapeCy + hh, timestamp: now + 15 },
+          { x: shapeCx - hw, y: shapeCy - hh, timestamp: now + 20 },
         ],
         tool: 'pen',
         color: penColor,
@@ -396,19 +636,21 @@ export function MathCanvas({
         timestamp: now
       });
     } else if (type === 'circle') {
-      const r = 70;
+      const r = 60;
       const count = 48;
       const pts = [];
       for (let i = 0; i <= count; i++) {
         const a = (i * 2 * Math.PI) / count;
         pts.push({
-          x: Math.round(cx + r * Math.cos(a)),
-          y: Math.round(cy + r * Math.sin(a)),
+          x: Math.round(shapeCx + r * Math.cos(a)),
+          y: Math.round(shapeCy + r * Math.sin(a)),
           timestamp: now + i * 2
         });
       }
       newStrokes.push({
         id: `stroke-shape-${now}-1`,
+        shapeId,
+        shapeType: type,
         points: pts,
         tool: 'pen',
         color: penColor,
@@ -418,7 +660,8 @@ export function MathCanvas({
     }
 
     onStrokesChange([...strokes, ...newStrokes]);
-    onToolChange('pen');
+    setSelectedShapeId(shapeId);
+    onToolChange('select');
   }, [containerSize, penColor, penWidth, strokes, onStrokesChange, onToolChange]);
 
   useEffect(() => {
@@ -435,7 +678,10 @@ export function MathCanvas({
       <div className="canvas-toolbar" role="toolbar" aria-label="Drawing tools">
         <button
           className={`toolbar-btn ${tool === 'pen' ? 'active' : ''}`}
-          onClick={() => onToolChange('pen')}
+          onClick={() => {
+            onToolChange('pen');
+            setSelectedShapeId(null);
+          }}
           aria-pressed={tool === 'pen'}
           disabled={disabled}
           title="Pen (P)"
@@ -450,7 +696,10 @@ export function MathCanvas({
         </button>
         <button
           className={`toolbar-btn ${tool === 'eraser' ? 'active' : ''}`}
-          onClick={() => onToolChange('eraser')}
+          onClick={() => {
+            onToolChange('eraser');
+            setSelectedShapeId(null);
+          }}
           aria-pressed={tool === 'eraser'}
           disabled={disabled}
           title="Eraser (E)"
@@ -466,7 +715,20 @@ export function MathCanvas({
             <path d="M10 15 6 19" />
           </svg>
         </button>
+        <button
+          className={`toolbar-btn ${tool === 'select' ? 'active' : ''}`}
+          onClick={() => onToolChange(tool === 'select' ? 'pen' : 'select')}
+          aria-pressed={tool === 'select'}
+          disabled={disabled}
+          title="Move / Select Shape or Drawing (M)"
+          aria-label="Move tool"
+          style={{ fontSize: '15px' }}
+        >
+          🖐️
+        </button>
+
         <div className="toolbar-divider" role="separator" />
+
         <div className="shape-picker-container" ref={shapeMenuRef}>
           <button
             type="button"
@@ -533,6 +795,29 @@ export function MathCanvas({
             </div>
           )}
         </div>
+
+        {selectedShapeId && tool === 'select' && (
+          <button
+            type="button"
+            className="toolbar-btn"
+            onClick={deleteSelectedShape}
+            title="Delete Selected Shape"
+            style={{
+              color: '#ef4444',
+              fontSize: '12px',
+              display: 'flex',
+              alignItems: 'center',
+              gap: '4px',
+              padding: '0 8px',
+              width: 'auto',
+              border: '1px solid rgba(239, 68, 68, 0.4)',
+              borderRadius: '6px'
+            }}
+          >
+            🗑️ Delete Shape
+          </button>
+        )}
+
         <div className="toolbar-divider" role="separator" />
         <button
           className="toolbar-btn"
@@ -580,6 +865,11 @@ export function MathCanvas({
         className="math-canvas"
         aria-label="Math writing canvas"
         role="application"
+        style={{
+          cursor: tool === 'select'
+            ? (isDraggingShape ? 'grabbing' : (hoveredShapeId ? 'grab' : 'default'))
+            : (tool === 'eraser' ? 'cell' : 'crosshair')
+        }}
         onPointerDown={handlePointerDown}
         onPointerMove={handlePointerMove}
         onPointerUp={handlePointerUp}
