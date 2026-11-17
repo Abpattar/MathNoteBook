@@ -402,6 +402,66 @@
   margin: 0;
 }
 
+/* Multimodal input strip */
+.input-multimodal-actions {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+  flex-wrap: wrap;
+}
+
+.voice-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 8px 14px;
+  font-size: 0.85rem;
+  font-weight: 600;
+  border-radius: var(--radius-md);
+  border: 1px solid #3b82f6;
+  background: rgba(59, 130, 246, 0.1);
+  color: #3b82f6;
+  cursor: pointer;
+  transition: all 0.2s ease;
+}
+
+.voice-btn:hover {
+  background: #3b82f6;
+  color: #ffffff;
+}
+
+.voice-btn.listening {
+  background: #ef4444;
+  color: #ffffff;
+  border-color: #dc2626;
+  animation: pulseGlow 1s infinite alternate;
+}
+
+.sign-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 8px 14px;
+  font-size: 0.85rem;
+  font-weight: 600;
+  border-radius: var(--radius-md);
+  border: 1px solid #10b981;
+  background: rgba(16, 185, 129, 0.1);
+  color: #10b981;
+  cursor: pointer;
+  transition: all 0.2s ease;
+}
+
+.sign-btn:hover {
+  background: #10b981;
+  color: #0f172a;
+}
+
+@keyframes pulseGlow {
+  from { box-shadow: 0 0 5px rgba(239, 68, 68, 0.5); }
+  to { box-shadow: 0 0 16px rgba(239, 68, 68, 0.9); }
+}
+
 @media (max-width: 640px) {
   .header-content {
     flex-direction: column;

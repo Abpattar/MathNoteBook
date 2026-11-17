@@ -818,3 +818,37 @@ async def get_analytics():
         "topics_practiced": {},
         "note": "Privacy-conscious counters only. No student content stored."
     }
+
+
+class VoiceNormalizeRequest(BaseModel):
+    transcript: str
+
+
+@router.post("/voice/normalize")
+async def normalize_voice_input(request: VoiceNormalizeRequest):
+    """Normalize spoken mathematical expressions into standardized LaTeX and algebra."""
+    from src.voice.math_normalizer import normalize_voice_transcript
+    result = normalize_voice_transcript(request.transcript)
+    return result
+
+
+class ConceptReviewRequest(BaseModel):
+    concept_id: str
+    is_correct: bool = True
+    elapsed_days: float = 1.0
+    current_state: Optional[Dict[str, Any]] = None
+
+
+@router.post("/learning/review")
+async def review_concept_endpoint(request: ConceptReviewRequest):
+    """Update student concept mastery using FSRS-6 spaced repetition algorithm."""
+    from src.learning.fsrs import FSRS6Engine
+    engine = FSRS6Engine()
+    result = engine.review_concept(
+        concept_id=request.concept_id,
+        is_correct=request.is_correct,
+        elapsed_days=request.elapsed_days,
+        current_state=request.current_state
+    )
+    return result
+

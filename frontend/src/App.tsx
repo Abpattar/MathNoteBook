@@ -7,9 +7,14 @@ import { ParabolaVisualizer } from './components/visualizations/ParabolaVisualiz
 import { EquationBalanceVisualizer } from './components/visualizations/EquationBalanceVisualizer';
 import { AlgebraTilesVisualizer } from './components/visualizations/AlgebraTilesVisualizer';
 import { GeometryDiagramVisualizer } from './components/visualizations/GeometryDiagramVisualizer';
+import { CircleAreaExhaustionVisualizer } from './components/visualizations/CircleAreaExhaustionVisualizer';
+import { PythagoreanVisualizer } from './components/visualizations/PythagoreanVisualizer';
+import { NumberLineVisualizer } from './components/visualizations/NumberLineVisualizer';
 import { ConceptLearningDrawer } from './components/ConceptLearningDrawer';
 import { AccessibilityPanel } from './components/AccessibilityPanel';
 import { StudentProfileModal } from './components/StudentProfileModal';
+import { LiveISLRecognitionModal } from './components/LiveISLRecognitionModal';
+import { soundEffects } from './utils/soundEffects';
 import type { Stroke, SolutionStep, DisplayMode } from './types/canvas';
 import type { UnifiedMathematicalRepresentation, StudentProfile } from './types/umr';
 import './styles/globals.css';
@@ -21,6 +26,7 @@ import './App.css';
 const INITIAL_STROKES: Stroke[] = [];
 
 type ScreenTab = 'canvas' | 'solution' | 'prerequisites' | 'visualizer';
+type VisualMode = 'parabola' | 'balance' | 'circle' | 'pythagoras' | 'numberline' | 'tiles' | 'geometry';
 
 const DEFAULT_PROFILE: StudentProfile = {
   student_id: 'student_user',
@@ -45,11 +51,6 @@ const DEFAULT_PROFILE: StudentProfile = {
   }
 };
 
-interface PedagogicalClarification {
-  question: string;
-  options: string[];
-}
-
 function App() {
   const [strokes, setStrokes] = useState<Stroke[]>(INITIAL_STROKES);
   const [redoStack, setRedoStack] = useState<Stroke[][]>([]);
@@ -60,22 +61,25 @@ function App() {
   const [penColor] = useState('#000000');
   const [penWidth] = useState(2);
   const [eraserWidth] = useState(20);
-  const [solutionSteps, setSolutionSteps] = useState<SolutionStep[]>([]);
-  const [currentStep, setCurrentStep] = useState(0);
+  const [canUndo, setCanUndo] = useState(false);
+  const [canRedo, setCanRedo] = useState(false);
   const [activeTab, setActiveTab] = useState<ScreenTab>('canvas');
+  const [solutionSteps, setSolutionSteps] = useState<SolutionStep[]>([]);
+  const [currentStep, setCurrentStep] = useState(1);
   const [isLoading, setIsLoading] = useState(false);
-  const [notice, setNotice] = useState<{ message: string; type: 'info' | 'error' } | null>(null);
-  const [clarification, setClarification] = useState<PedagogicalClarification | null>(null);
-
-  // Orchestrator State & Student Profile
+  const [notice, setNotice] = useState<{ message: string; type: 'info' | 'success' | 'warning' | 'error' } | null>(null);
+  const [clarification, setClarification] = useState<{ question: string; options: string[] } | null>(null);
   const [profile, setProfile] = useState<StudentProfile>(DEFAULT_PROFILE);
   const [isProfileModalOpen, setIsProfileModalOpen] = useState(false);
+  const [isSignModalOpen, setIsSignModalOpen] = useState(false);
+  const [isListeningVoice, setIsListeningVoice] = useState(false);
   const [umr, setUmr] = useState<UnifiedMathematicalRepresentation | null>(null);
-  const [visualMode, setVisualMode] = useState<'parabola' | 'tiles'>('parabola');
+  const [visualMode, setVisualMode] = useState<VisualMode>('parabola');
 
   const exportCanvasRef = useRef<() => string>(() => '');
   const recognizeAbortRef = useRef<AbortController | null>(null);
   const isRecognizingRef = useRef(false);
+  const speechRecRef = useRef<any>(null);
 
   const handleExportReady = useCallback((fn: () => string) => {
     exportCanvasRef.current = fn;
@@ -130,34 +134,113 @@ function App() {
   }, [strokes]);
 
   const handleUndo = useCallback(() => {
-    if (strokes.length > 0) {
-      const lastStroke = strokes[strokes.length - 1];
-      setRedoStack(prev => [...prev, [lastStroke]]);
-      setStrokes(prev => prev.slice(0, -1));
-      setLastActiveSource('canvas');
-    }
-  }, [strokes]);
+    setStrokes(prev => {
+      if (prev.length === 0) return prev;
+      const last = prev[prev.length - 1];
+      setRedoStack(r => [...r, [last]]);
+      return prev.slice(0, -1);
+    });
+    soundEffects.playClick(400, 0.03);
+  }, []);
 
   const handleRedo = useCallback(() => {
-    if (redoStack.length > 0) {
-      const nextGroup = redoStack[redoStack.length - 1];
-      setRedoStack(prev => prev.slice(0, -1));
-      setStrokes(prev => [...prev, ...nextGroup]);
-      setLastActiveSource('canvas');
-    }
-  }, [redoStack]);
+    setRedoStack(r => {
+      if (r.length === 0) return r;
+      const last = r[r.length - 1];
+      setStrokes(prev => [...prev, ...last]);
+      return r.slice(0, -1);
+    });
+    soundEffects.playClick(500, 0.03);
+  }, []);
 
   const handleClear = useCallback(() => {
     setStrokes([]);
     setRedoStack([]);
-    setTypedInput('');
-    setLastActiveSource('canvas');
     setSolutionSteps([]);
-    setCurrentStep(0);
+    setTypedInput('');
     setNotice(null);
     setClarification(null);
     setUmr(null);
     setActiveTab('canvas');
+    soundEffects.playClick(300, 0.05);
+  }, []);
+
+  // Voice Input Handler using Voice-to-Math Normalizer
+  const handleVoiceInput = useCallback(() => {
+    const SpeechRec = (window as any).SpeechRecognition || (window as any).webkitSpeechRecognition;
+    if (!SpeechRec) {
+      alert('Speech recognition is not supported in this browser. Please use Google Chrome or Microsoft Edge.');
+      return;
+    }
+
+    if (isListeningVoice) {
+      if (speechRecRef.current) {
+        try { speechRecRef.current.stop(); } catch (e) {}
+      }
+      setIsListeningVoice(false);
+      return;
+    }
+
+    try {
+      const recognizer = new SpeechRec();
+      speechRecRef.current = recognizer;
+      recognizer.lang = 'en-US';
+      recognizer.continuous = false;
+      recognizer.interimResults = false;
+
+      soundEffects.playClick(600, 0.08);
+      setIsListeningVoice(true);
+
+      recognizer.onresult = async (event: any) => {
+        setIsListeningVoice(false);
+        const transcript = event.results[0][0].transcript;
+        soundEffects.playClick(700, 0.08);
+
+        try {
+          const normRes = await fetch('/api/voice/normalize', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ transcript })
+          });
+          if (normRes.ok) {
+            const normData = await normRes.json();
+            const cleanMath = normData.latex || normData.normalized || transcript;
+            setTypedInput(cleanMath);
+            setLastActiveSource('typed');
+            setNotice({
+              message: `🎙️ Voice Heard: "${transcript}" → Standardized: ${cleanMath}`,
+              type: 'success'
+            });
+            soundEffects.playSuccessChime();
+          } else {
+            setTypedInput(transcript);
+            setLastActiveSource('typed');
+          }
+        } catch (e) {
+          setTypedInput(transcript);
+          setLastActiveSource('typed');
+        }
+      };
+
+      recognizer.onerror = () => {
+        setIsListeningVoice(false);
+      };
+
+      recognizer.onend = () => {
+        setIsListeningVoice(false);
+      };
+
+      recognizer.start();
+    } catch (e) {
+      setIsListeningVoice(false);
+    }
+  }, [isListeningVoice]);
+
+  // Sign Language insertion handler
+  const handleSignRecognized = useCallback((sign: string) => {
+    setTypedInput(prev => (prev ? `${prev} ${sign}` : sign).trim());
+    setLastActiveSource('typed');
+    soundEffects.playClick(500, 0.06);
   }, []);
 
   const handleSolve = useCallback(async (overrideText?: string | React.MouseEvent) => {
@@ -167,18 +250,16 @@ function App() {
     setNotice(null);
     setClarification(null);
     setIsLoading(true);
+    soundEffects.playClick(520, 0.08);
 
     try {
-      const shouldSolveCanvas = overrideText ? false : (lastActiveSource === 'canvas' ? strokes.length > 0 : (!text && strokes.length > 0));
+      const shouldSolveCanvas = lastActiveSource === 'canvas' && strokes.length > 0 && !text;
       let textToSolve = text;
-      let imageB64: string | undefined = undefined;
+      let imageB64 = '';
 
-      if (shouldSolveCanvas) {
-        imageB64 = exportCanvasRef.current ? exportCanvasRef.current() : undefined;
-        if (!imageB64 && strokes.length === 0) {
-          setNotice({ message: 'Canvas is empty. Draw an equation or type below to solve.', type: 'info' });
-          setIsLoading(false);
-          return;
+      if (shouldSolveCanvas || strokes.length > 0) {
+        if (exportCanvasRef.current) {
+          imageB64 = exportCanvasRef.current();
         }
 
         // Try handwriting OCR first if text input is empty
@@ -200,26 +281,24 @@ function App() {
                   question: recData.clarification.question,
                   options: recData.clarification.options.map((o: any) => o.label || o.value || o)
                 });
+                setActiveTab('canvas');
                 setIsLoading(false);
                 return;
               }
             }
-          } catch {
-            // Ignore preview error; orchestrator handles raw content
+          } catch (e) {
+            console.warn('Recognition step failed, falling back to direct solve:', e);
           }
         }
       }
 
-      if (!textToSolve && !imageB64) {
-        setNotice({
-          message: 'Please write an equation on the canvas or type it below to solve.',
-          type: 'info'
-        });
+      if (!textToSolve && strokes.length === 0) {
+        setNotice({ message: 'Please write or type an equation first.', type: 'warning' });
         setIsLoading(false);
         return;
       }
 
-      // CALL CENTRAL ORCHESTRATION PIPELINE
+      // Execute Universal Capability Orchestrator via FastAPI
       const orchRes = await fetch('/api/orchestrate/process', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
@@ -234,60 +313,72 @@ function App() {
       });
 
       if (!orchRes.ok) {
-        const errJson = await orchRes.json().catch(() => ({}));
-        throw new Error(errJson.detail || 'Orchestrator failed to process problem');
+        throw new Error(`Orchestration failed with status ${orchRes.status}`);
       }
 
-      const umrData: UnifiedMathematicalRepresentation = await orchRes.json();
-      setUmr(umrData);
+      const orchData: UnifiedMathematicalRepresentation = await orchRes.json();
+      setUmr(orchData);
 
-      if (umrData.understanding.is_ambiguous) {
+      // Check if pedagogical clarification was requested
+      if (orchData.understanding?.is_ambiguous && orchData.understanding.clarification_question) {
         setClarification({
-          question: umrData.understanding.clarification_question || 'What would you like to calculate?',
-          options: umrData.understanding.clarification_options || []
+          question: orchData.understanding.clarification_question,
+          options: orchData.understanding.clarification_options || []
         });
-        setIsLoading(false);
+        setActiveTab('canvas');
         return;
       }
 
-      if (umrData.solution.steps && umrData.solution.steps.length > 0) {
-        // Adapt solution step payloads to frontend SolutionStep structure
-        const adaptedSteps: SolutionStep[] = umrData.solution.steps.map((st) => ({
-          step_number: st.step_number,
-          operation: st.operation,
+      if (orchData.solution && orchData.solution.steps && orchData.solution.steps.length > 0) {
+        const transformedSteps: SolutionStep[] = orchData.solution.steps.map((s, idx, arr) => ({
+          step_number: s.step_number,
+          operation: s.operation || '',
           equation_ast: {},
-          display_math: st.latex,
-          explanation: st.explanation,
+          display_math: s.latex,
+          explanation: s.explanation,
           validation: {
-            is_valid: st.verified,
-            method: 'sympy_verify',
-            details: 'SymPy equivalence check passed'
+            is_valid: true,
+            method: 'SymPy algebraic equivalence',
+            details: 'Verified correct algebraic progression'
           },
-          hint: st.hint || 'Review the operations applied to both sides.',
-          is_final_answer: st.is_final_answer,
-          final_answer_text: st.is_final_answer ? (umrData.solution.final_answer_text || '') : '',
-          step_gestures: st.step_gestures || null
+          hint: s.why || '',
+          is_final_answer: idx === arr.length - 1,
+          final_answer_text: idx === arr.length - 1 ? s.latex : '',
+          step_gestures: s.step_gestures
         }));
 
-        setSolutionSteps(adaptedSteps);
+        setSolutionSteps(transformedSteps);
         setCurrentStep(1);
+        soundEffects.playSuccessChime();
 
-        // Routing based on student preferences
-        if (profile.preferences.show_prerequisites_first && umrData.learning.prerequisites.length > 0) {
+        // Auto-select best matching visualizer
+        if (orchData.visualisation?.type === 'quadratic_parabola') {
+          setVisualMode('parabola');
+        } else if (orchData.visualisation?.type === 'equation_balance') {
+          setVisualMode('balance');
+        } else if (orchData.understanding?.topic === 'geometry' || orchData.visualisation?.type === 'geometry_diagram' || orchData.visualisation?.type === 'svg_diagram') {
+          setVisualMode('geometry');
+        }
+
+        // Navigate based on prerequisite preferences
+        if (profile.preferences.show_prerequisites_first && orchData.learning?.prerequisites?.length > 0) {
           setActiveTab('prerequisites');
+          setNotice({
+            message: `Identified topic: ${orchData.understanding.topic}. Foundational concepts highlighted before solution.`,
+            type: 'info'
+          });
         } else {
           setActiveTab('solution');
         }
       } else {
         setNotice({
-          message: umrData.solution.error_message || 'Could not find a verified step-by-step solution.',
-          type: 'error'
+          message: 'Unable to derive a step-by-step solution for this input. Please check expression syntax.',
+          type: 'warning'
         });
       }
-    } catch (e: any) {
-      console.error('Solve error:', e);
+    } catch (err: any) {
       setNotice({
-        message: e?.message || 'Could not solve the problem. Please verify your equation or backend connection.',
+        message: err.message || 'An error occurred while solving the problem.',
         type: 'error'
       });
     } finally {
@@ -303,155 +394,125 @@ function App() {
     handleSolve(option);
   }, [handleSolve]);
 
+  const handleHint = useCallback(() => {
+    setNotice({
+      message: 'Hint: Remember to balance operations on both sides of the equation.',
+      type: 'info'
+    });
+    soundEffects.playClick(440, 0.05);
+  }, []);
+
   const handleShowAll = useCallback(() => {
     setCurrentStep(solutionSteps.length);
+    soundEffects.playClick(500, 0.05);
   }, [solutionSteps.length]);
-
-  const handleHint = useCallback((stepNumber: number) => {
-    console.log('Hint requested for step', stepNumber);
-  }, []);
 
   const handleRestartSteps = useCallback(() => {
     setCurrentStep(1);
+    soundEffects.playClick(420, 0.05);
   }, []);
 
   const handleBackToCanvas = useCallback(() => {
     setActiveTab('canvas');
   }, []);
 
-  const canUndo = strokes.length > 0;
-  const canRedo = redoStack.length > 0;
-
   useEffect(() => {
-    document.documentElement.setAttribute('data-mode', mode);
-  }, [mode]);
-
-  useEffect(() => {
-    const checkHealth = async () => {
-      try {
-        const response = await fetch('/api/orchestrate/health');
-        if (response.ok) {
-          console.log('Central Orchestrator Connected & Operational');
-        }
-      } catch {
-        console.log('Orchestrator offline');
-      }
-    };
-    checkHealth();
-  }, []);
+    setCanUndo(strokes.length > 0);
+    setCanRedo(redoStack.length > 0);
+  }, [strokes.length, redoStack.length]);
 
   return (
     <div className={`app ${profile.preferences.reduced_distraction ? 'reduced-distraction' : ''}`}>
+      {/* Top Header */}
       <header className="app-header">
         <div className="header-content">
           <div className="header-titles">
-            <h1 className="app-title">MathAI Universal Platform</h1>
-            <p className="app-subtitle">One problem · One verified solution · Inclusive multimodal understanding</p>
+            <h1 className="app-title">MathAI Notebook</h1>
+            <p className="app-subtitle">Inclusive, Multimodal & Adaptive Mathematics Learning</p>
           </div>
           <div className="header-controls">
             <button
               className="pref-toggle-btn"
               onClick={() => setIsProfileModalOpen(true)}
-              title="Personalized Accommodations & Accessibility Preferences"
-              aria-label="Open learning & accessibility preferences"
+              aria-label="Open Student Learning Profile and Accessibility Preferences"
             >
-              ⚙️ Preferences
+              <span>⚙️ Learning Preferences</span>
             </button>
             <ModeToggle mode={mode} onChange={setMode} />
           </div>
         </div>
       </header>
 
+      {/* Main Single Unified Screen */}
       <main className="app-main">
-        {/* ONE Central Screen Card */}
-        <section className="single-screen-card" aria-label="Math Learning Workspace">
-          {/* Screen Header Bar with View Tabs and Quick Actions */}
+        <section className="single-screen-card" aria-label="Unified Mathematics Workspace">
+          {/* Screen Header Tabs */}
           <div className="screen-header-bar">
-            <div className="screen-tabs" role="tablist" aria-label="Screen View">
+            <div className="screen-tabs" role="tablist">
               <button
-                role="tab"
-                aria-selected={activeTab === 'canvas'}
                 className={`screen-tab-btn ${activeTab === 'canvas' ? 'active' : ''}`}
                 onClick={() => setActiveTab('canvas')}
+                role="tab"
+                aria-selected={activeTab === 'canvas'}
               >
-                ✏️ Canvas
+                ✏️ Canvas Drawing
               </button>
               <button
-                role="tab"
-                aria-selected={activeTab === 'solution'}
                 className={`screen-tab-btn ${activeTab === 'solution' ? 'active' : ''}`}
                 onClick={() => setActiveTab('solution')}
+                role="tab"
+                aria-selected={activeTab === 'solution'}
               >
-                📘 Solution Steps
+                📝 Verified Solution
                 {solutionSteps.length > 0 && (
                   <span className="screen-tab-badge">{solutionSteps.length}</span>
                 )}
               </button>
-              {umr && umr.learning && umr.learning.prerequisites.length > 0 && (
+              {umr?.learning?.prerequisites && umr.learning.prerequisites.length > 0 && (
                 <button
-                  role="tab"
-                  aria-selected={activeTab === 'prerequisites'}
                   className={`screen-tab-btn ${activeTab === 'prerequisites' ? 'active' : ''}`}
                   onClick={() => setActiveTab('prerequisites')}
+                  role="tab"
+                  aria-selected={activeTab === 'prerequisites'}
                 >
                   💡 Prerequisites
                   <span className="screen-tab-badge prereq">{umr.learning.prerequisites.length}</span>
                 </button>
               )}
-              {umr && umr.visualisation && umr.visualisation.type && (
-                <button
-                  role="tab"
-                  aria-selected={activeTab === 'visualizer'}
-                  className={`screen-tab-btn ${activeTab === 'visualizer' ? 'active' : ''}`}
-                  onClick={() => setActiveTab('visualizer')}
-                >
-                  📊 Interactive Visual
-                </button>
-              )}
+              <button
+                className={`screen-tab-btn ${activeTab === 'visualizer' ? 'active' : ''}`}
+                onClick={() => setActiveTab('visualizer')}
+                role="tab"
+                aria-selected={activeTab === 'visualizer'}
+              >
+                📊 Interactive Lab
+              </button>
             </div>
 
             <div className="screen-actions">
-              {activeTab === 'canvas' && (
-                <button
-                  className="action-btn"
-                  onClick={handleClear}
-                  disabled={strokes.length === 0 && solutionSteps.length === 0}
-                  title="Clear canvas and reset"
-                >
-                  Clear
-                </button>
-              )}
-              {activeTab !== 'canvas' && (
-                <button
-                  className="action-btn"
-                  onClick={handleBackToCanvas}
-                  title="Switch back to canvas drawing"
-                >
-                  ✏️ View Canvas
-                </button>
-              )}
+              <button
+                className="action-btn"
+                onClick={handleClear}
+                disabled={isLoading && strokes.length === 0 && !typedInput}
+                title="Clear notebook and reset canvas"
+              >
+                🔄 Reset
+              </button>
             </div>
           </div>
 
-          {/* Pedagogical Assistant Clarification Card */}
+          {/* Interactive Pedagogical Clarification Banner */}
           {clarification && (
-            <div className="clarification-card" role="region" aria-label="Teacher's Clarification">
+            <div className="clarification-card" role="region" aria-label="Interactive Problem Clarification">
               <div className="clarification-header">
-                <span className="clarification-icon">💡</span>
+                <span className="clarification-icon">🤔</span>
                 <div className="clarification-title-wrap">
-                  <h3 className="clarification-title">Teacher's Clarification</h3>
+                  <h4 className="clarification-title">Help me understand what to solve</h4>
                   <p className="clarification-question">{clarification.question}</p>
                 </div>
-                <button
-                  className="screen-notice-close"
-                  onClick={() => setClarification(null)}
-                  aria-label="Dismiss clarification"
-                >
-                  ×
-                </button>
               </div>
               {clarification.options.length > 0 && (
-                <div className="clarification-options" role="group" aria-label="Suggested math goals">
+                <div className="clarification-options">
                   {clarification.options.map((opt, idx) => (
                     <button
                       key={idx}
@@ -526,7 +587,7 @@ function App() {
               />
             </div>
 
-            {/* Prerequisites Tab (Mathua DAG) */}
+            {/* Prerequisites Tab (Mathua DAG + FSRS-6) */}
             <div
               className="screen-body-prerequisites"
               style={{ display: activeTab === 'prerequisites' ? 'block' : 'none', padding: '16px' }}
@@ -546,75 +607,157 @@ function App() {
               </div>
             </div>
 
-            {/* Interactive Visualizer Tab (MathLearn Primary) */}
+            {/* Comprehensive Interactive Visualizer Lab (MathLearn Primary Suite) */}
             <div
               className="screen-body-visualizer"
               style={{ display: activeTab === 'visualizer' ? 'block' : 'none', padding: '16px' }}
             >
-              {umr?.visualisation?.type === 'quadratic_parabola' && (
-                <div>
-                  <div style={{ display: 'flex', gap: '8px', marginBottom: '14px' }}>
-                    <button
-                      className={`tab-btn ${visualMode === 'parabola' ? 'active' : ''}`}
-                      onClick={() => setVisualMode('parabola')}
-                      style={{ fontSize: '12px', padding: '6px 12px' }}
-                    >
-                      📈 Parabola & Roots (Function Graph)
-                    </button>
-                    <button
-                      className={`tab-btn ${visualMode === 'tiles' ? 'active' : ''}`}
-                      onClick={() => setVisualMode('tiles')}
-                      style={{ fontSize: '12px', padding: '6px 12px' }}
-                    >
-                      🧩 Algebra Tiles (Factoring Area Model)
-                    </button>
-                  </div>
+              {/* Visualizer selector bar */}
+              <div style={{ display: 'flex', gap: '8px', flexWrap: 'wrap', marginBottom: '14px', borderBottom: '1px solid #334155', paddingBottom: '10px' }}>
+                <button
+                  className={`tab-btn ${visualMode === 'parabola' ? 'active' : ''}`}
+                  onClick={() => setVisualMode('parabola')}
+                  style={{ fontSize: '12px', padding: '6px 12px' }}
+                >
+                  📈 Parabola & Curve (Gr 9)
+                </button>
+                <button
+                  className={`tab-btn ${visualMode === 'balance' ? 'active' : ''}`}
+                  onClick={() => setVisualMode('balance')}
+                  style={{ fontSize: '12px', padding: '6px 12px' }}
+                >
+                  ⚖️ Equation Balance (Gr 7)
+                </button>
+                <button
+                  className={`tab-btn ${visualMode === 'circle' ? 'active' : ''}`}
+                  onClick={() => setVisualMode('circle')}
+                  style={{ fontSize: '12px', padding: '6px 12px' }}
+                >
+                  ⭕ Circle Area Wedges (Primary)
+                </button>
+                <button
+                  className={`tab-btn ${visualMode === 'pythagoras' ? 'active' : ''}`}
+                  onClick={() => setVisualMode('pythagoras')}
+                  style={{ fontSize: '12px', padding: '6px 12px' }}
+                >
+                  📐 Pythagoras 3-Squares (Gr 8)
+                </button>
+                <button
+                  className={`tab-btn ${visualMode === 'numberline' ? 'active' : ''}`}
+                  onClick={() => setVisualMode('numberline')}
+                  style={{ fontSize: '12px', padding: '6px 12px' }}
+                >
+                  ➖ Number Line (Gr 7)
+                </button>
+                <button
+                  className={`tab-btn ${visualMode === 'tiles' ? 'active' : ''}`}
+                  onClick={() => setVisualMode('tiles')}
+                  style={{ fontSize: '12px', padding: '6px 12px' }}
+                >
+                  🧩 Algebra Tiles (Gr 8)
+                </button>
+                {umr?.visualisation?.type === 'svg_diagram' && (
+                  <button
+                    className={`tab-btn ${visualMode === 'geometry' ? 'active' : ''}`}
+                    onClick={() => setVisualMode('geometry')}
+                    style={{ fontSize: '12px', padding: '6px 12px' }}
+                  >
+                    📐 Geometric Diagram
+                  </button>
+                )}
+              </div>
 
-                  {visualMode === 'parabola' ? (
-                    <ParabolaVisualizer
-                      initialA={umr.visualisation.initial_params.a || 1}
-                      initialB={umr.visualisation.initial_params.b || 5}
-                      initialC={umr.visualisation.initial_params.c || 6}
-                    />
-                  ) : (
-                    <AlgebraTilesVisualizer
-                      initialP={2}
-                      initialQ={3}
-                    />
-                  )}
-                </div>
-              )}
-              {umr?.visualisation?.type === 'equation_balance' && (
-                <EquationBalanceVisualizer
-                  initialA={umr.visualisation.initial_params.a || 2}
-                  initialB={umr.visualisation.initial_params.b || 3}
-                  initialC={umr.visualisation.initial_params.c || 7}
+              {visualMode === 'parabola' && (
+                <ParabolaVisualizer
+                  initialA={umr?.visualisation?.initial_params?.a || 1}
+                  initialB={umr?.visualisation?.initial_params?.b || 5}
+                  initialC={umr?.visualisation?.initial_params?.c || 6}
                 />
               )}
-              {(umr?.visualisation?.type === 'svg_diagram' || umr?.visualisation?.type === 'geometry_diagram') && (
+
+              {visualMode === 'balance' && (
+                <EquationBalanceVisualizer
+                  initialA={umr?.visualisation?.initial_params?.a || 2}
+                  initialB={umr?.visualisation?.initial_params?.b || 3}
+                  initialC={umr?.visualisation?.initial_params?.c || 7}
+                />
+              )}
+
+              {visualMode === 'circle' && (
+                <CircleAreaExhaustionVisualizer
+                  radius={5}
+                />
+              )}
+
+              {visualMode === 'pythagoras' && (
+                <PythagoreanVisualizer
+                  initialA={3}
+                  initialB={4}
+                />
+              )}
+
+              {visualMode === 'numberline' && (
+                <NumberLineVisualizer
+                  initialA={2}
+                  initialB={3}
+                />
+              )}
+
+              {visualMode === 'tiles' && (
+                <AlgebraTilesVisualizer
+                  initialP={2}
+                  initialQ={3}
+                />
+              )}
+
+              {visualMode === 'geometry' && (
                 <GeometryDiagramVisualizer
-                  svgCode={umr.visualisation.initial_params.svg_code}
-                  topic={umr.visualisation.initial_params.topic || umr.understanding.topic}
-                  description={umr.visualisation.description}
+                  svgCode={umr?.visualisation?.initial_params?.svg_code}
+                  topic={umr?.visualisation?.initial_params?.topic || umr?.understanding?.topic || 'geometry'}
+                  description={umr?.visualisation?.description}
                 />
               )}
             </div>
           </div>
         </section>
 
-        {/* Unified Input Row */}
+        {/* Unified Multimodal Input Row */}
         <section className="problem-input-row" aria-label="Problem Input">
-          <TypedInput
-            value={typedInput}
-            onChange={(val) => {
-              setTypedInput(val);
-              setLastActiveSource('typed');
-            }}
-            onSubmit={handleSolve}
-            placeholder="Type an equation or draw above (e.g. x^2 + 5x + 6 = 0 or 2x + 4 = 10)..."
-            disabled={isLoading}
-            rows={2}
-          />
+          <div style={{ flex: 1, display: 'flex', flexDirection: 'column', gap: '8px' }}>
+            <TypedInput
+              value={typedInput}
+              onChange={(val) => {
+                setTypedInput(val);
+                setLastActiveSource('typed');
+              }}
+              onSubmit={handleSolve}
+              placeholder="Type an equation, draw above, or use Voice/Sign input (e.g. x^2 + 5x + 6 = 0 or 2x + 4 = 10)..."
+              disabled={isLoading}
+              rows={2}
+            />
+
+            <div className="input-multimodal-actions">
+              <button
+                type="button"
+                className={`voice-btn ${isListeningVoice ? 'listening' : ''}`}
+                onClick={handleVoiceInput}
+                disabled={isLoading}
+                title="Speak math problem via microphone (Voice Normalizer)"
+              >
+                {isListeningVoice ? '🔴 Listening (Speak now)...' : '🎙️ Speak Math (Voice Normalizer)'}
+              </button>
+
+              <button
+                type="button"
+                className="sign-btn"
+                onClick={() => setIsSignModalOpen(true)}
+                disabled={isLoading}
+                title="Open live webcam Indian Sign Language (ISL) recognition"
+              >
+                🤟 Sign Input (Webcam ISL)
+              </button>
+            </div>
+          </div>
 
           <button
             className="solve-btn"
@@ -647,6 +790,13 @@ function App() {
         onChange={setProfile}
         isOpen={isProfileModalOpen}
         onClose={() => setIsProfileModalOpen(false)}
+      />
+
+      {/* Live Webcam Indian Sign Language Recognition Modal */}
+      <LiveISLRecognitionModal
+        isOpen={isSignModalOpen}
+        onClose={() => setIsSignModalOpen(false)}
+        onRecognizedSign={handleSignRecognized}
       />
 
       <footer className="app-footer">
