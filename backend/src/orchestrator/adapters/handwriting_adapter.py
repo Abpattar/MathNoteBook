@@ -60,6 +60,9 @@ class HandwritingAdapter(BaseAdapter):
     def parse_string_to_ast(self, text: str) -> Optional[Dict[str, Any]]:
         clean = text.strip()
         clean = re.sub(r'^(solve|calculate|evaluate|simplify|find)\s+', '', clean, flags=re.IGNORECASE).strip()
+        clean = re.sub(r'\\frac\{([^}]+)\}\{([^}]+)\}', r'((\1)/(\2))', clean)
+        clean = re.sub(r'\\sqrt\{([^}]+)\}', r'sqrt(\1)', clean)
+        clean = clean.replace('\\times', '*').replace('\\div', '/').replace('^', '**')
         
         try:
             if "=" in clean and clean.count("=") == 1:

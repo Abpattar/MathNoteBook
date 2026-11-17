@@ -20,8 +20,10 @@ class Settings(BaseSettings):
     llm_api_key: Optional[str] = None
 
     # Vision LLM (for handwriting recognition)
-    vision_llm_base_url: str = "https://api.openai.com/v1"
-    vision_llm_model: str = "gpt-4o"
+    vision_llm_provider: str = "gemini"
+    gemini_api_key: Optional[str] = None
+    vision_llm_base_url: str = "https://generativelanguage.googleapis.com/v1beta"
+    vision_llm_model: str = "gemini-3.5-flash-lite"
     vision_llm_api_key: Optional[str] = None
 
     # Recognition thresholds

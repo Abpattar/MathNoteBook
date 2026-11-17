@@ -707,6 +707,7 @@ class UniversalMathInterpreter:
     def _match_algebra(self, clean: str, original: str) -> Dict[str, Any]:
         # Pre-clean expression and standardize syntax
         expr_str = clean
+        expr_str = re.sub(r'\\frac\{([^}]+)\}\{([^}]+)\}', r'((\1)/(\2))', expr_str)
         expr_str = re.sub(r'\\sqrt\{([^}]+)\}', r'sqrt(\1)', expr_str)
         expr_str = re.sub(r'\b(?:root|square\s+root)\s+(?:of\s+)?(\d+|[a-zA-Z])', r'sqrt(\1)', expr_str, flags=re.IGNORECASE)
         

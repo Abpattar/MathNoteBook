@@ -223,92 +223,121 @@ async def recognize_handwriting(request: RecognizeRequest):
 
     try:
         import httpx
-        payload = {
-            "model": settings.vision_llm_model,
-            "messages": [
-                {
-                    "role": "user",
-                    "content": [
+
+        # Extract raw base64 data and mime type
+        if "," in img_data:
+            header_part, b64_clean = img_data.split(",", 1)
+            mime_match = re.search(r"data:([^;]+);", header_part)
+            mime_type = mime_match.group(1) if mime_match else "image/png"
+        else:
+            b64_clean = img_data
+            mime_type = "image/png"
+
+        ocr_prompt = (
+            "You are an expert mathematical, handwriting, and geometric drawing OCR reader. Look at the canvas drawing.\n"
+            "1. Read all handwritten text, labels, annotations, or questions written in or around the drawing space (e.g. 'Area', 'shortest length', 'longest side', 'perimeter', 'hypotenuse', 'diagonal', 'find x', 'height', 'base', 'radius').\n"
+            "2. If it is an algebraic or arithmetic equation/expression, transcribe the math accurately into clean math/LaTeX text (e.g. 'x^2 + \\sqrt{25} + 1/4 = 8' or 'x^2 + 5x + 6 = 0').\n"
+            "3. If it is a geometric diagram (triangle, right triangle, square, rectangle, circle, polygon, angles):\n"
+            "   - Identify the shape and all labeled side lengths, angles (including 90° right angles), radius, or variables.\n"
+            "   - Read any words or questions written in the drawing space (e.g. 'Area', 'shortest length', 'perimeter', 'find hypotenuse', 'diagonal') and incorporate them into the problem statement.\n"
+            "   - Formulate as a clean, concise problem statement, for example:\n"
+            "     'Right triangle with legs 3 and 4, find Area'\n"
+            "     'Triangle with sides 3, 4, 5, find shortest length'\n"
+            "     'Triangle with sides 3, 4, 5, find Area'\n"
+            "     'Right triangle with angles 38°, 90°, find ?'\n"
+            "     'Rectangle with length 8 and width 5, find Area'\n"
+            "     'Square with side 6, find Area'\n"
+            "     'Circle with radius 5, find circumference'\n"
+            "   - If the student drew a shape with measurements but wrote NO question or target (e.g. just a right triangle with 3 and 4, or triangle with sides 3, 4, 5), transcribe the shape and measurements faithfully.\n"
+            "4. Output ONLY the transcribed problem text, with no markdown code blocks, quotes, or commentary."
+        )
+
+        raw_text = None
+
+        # Method A: Google Gemini generateContent API (supports AQ. and AIza keys directly)
+        is_gemini_key = api_key.startswith("AQ.") or api_key.startswith("AIza") or settings.vision_llm_provider == "gemini"
+        if is_gemini_key:
+            gemini_model = settings.vision_llm_model if "gemini" in settings.vision_llm_model else "gemini-3.5-flash-lite"
+            gemini_url = f"https://generativelanguage.googleapis.com/v1beta/models/{gemini_model}:generateContent?key={api_key}"
+            gemini_payload = {
+                "contents": [{
+                    "parts": [
+                        {"text": ocr_prompt},
                         {
-                            "type": "text",
-                            "text": (
-                                "You are an expert mathematical, handwriting, and geometric drawing OCR reader. Look at the canvas drawing.\n"
-                                "1. Read all handwritten text, labels, annotations, or questions written in or around the drawing space (e.g. 'Area', 'shortest length', 'longest side', 'perimeter', 'hypotenuse', 'diagonal', 'find x', 'height', 'base', 'radius').\n"
-                                "2. If it is an algebraic or arithmetic equation/expression, transcribe the math accurately into plain text (e.g. 'x^2 + 5x + 6 = 0' or '2x + 4 = 10').\n"
-                                "3. If it is a geometric diagram (triangle, right triangle, square, rectangle, circle, polygon, angles):\n"
-                                "   - Identify the shape and all labeled side lengths, angles (including 90° right angles), radius, or variables.\n"
-                                "   - Read any words or questions written in the drawing space (e.g. 'Area', 'shortest length', 'perimeter', 'find hypotenuse', 'diagonal') and incorporate them into the problem statement.\n"
-                                "   - Formulate as a clean, concise problem statement, for example:\n"
-                                "     'Right triangle with legs 3 and 4, find Area'\n"
-                                "     'Triangle with sides 3, 4, 5, find shortest length'\n"
-                                "     'Triangle with sides 3, 4, 5, find Area'\n"
-                                "     'Right triangle with angles 38°, 90°, find ?'\n"
-                                "     'Rectangle with length 8 and width 5, find Area'\n"
-                                "     'Square with side 6, find Area'\n"
-                                "     'Circle with radius 5, find circumference'\n"
-                                "   - If the student drew a shape with measurements but wrote NO question or target (e.g. just a right triangle with 3 and 4, or triangle with sides 3, 4, 5), transcribe the shape and measurements faithfully (e.g. 'Right triangle with legs 3 and 4' or 'Triangle with sides 3, 4, 5' or 'Rectangle with length 8 and width 5').\n"
-                                "4. Output ONLY the transcribed problem text, with no markdown code blocks, quotes, or commentary."
-                            )
-                        },
-                        {"type": "image_url", "image_url": {"url": img_data}}
+                            "inlineData": {
+                                "mimeType": mime_type,
+                                "data": b64_clean
+                            }
+                        }
                     ]
+                }],
+                "generationConfig": {
+                    "temperature": 0.1,
+                    "maxOutputTokens": 150
                 }
-            ],
-            "max_tokens": 100,
-            "temperature": 0.1
-        }
-        headers = {
-            "Authorization": f"Bearer {api_key}",
-            "Content-Type": "application/json",
-            "User-Agent": "MathAI/1.0"
-        }
-        async with httpx.AsyncClient(timeout=20.0) as client:
-            max_retries = 3
-            for attempt in range(max_retries):
-                resp = await client.post(
-                    f"{settings.vision_llm_base_url}/chat/completions",
-                    json=payload,
-                    headers=headers
-                )
+            }
+            async with httpx.AsyncClient(timeout=20.0) as client:
+                resp = await client.post(gemini_url, json=gemini_payload)
                 if resp.status_code == 200:
-                    raw_text = resp.json()["choices"][0]["message"]["content"].strip()
-                    raw_text = raw_text.replace("`", "").strip()
-                    result = await recognize_typed(RecognizeTypedRequest(text=raw_text))
-                    result.recognized_text = raw_text
-                    return result
-                elif resp.status_code == 429:
-                    if attempt < max_retries - 1:
-                        retry_after_hdr = resp.headers.get("retry-after")
-                        try:
-                            wait_time = float(retry_after_hdr) if retry_after_hdr else (1.5 * (attempt + 1))
-                        except (ValueError, TypeError):
-                            wait_time = 1.5 * (attempt + 1)
-                        await asyncio.sleep(min(wait_time, 3.5))
-                        continue
-                    else:
-                        return RecognitionResult(
-                            candidates=[],
-                            needs_clarification=True,
-                            clarification=ClarificationRequest(
-                                id=str(uuid.uuid4())[:8],
-                                question="The handwriting recognition service is temporarily busy (rate limit). Please wait a moment and click Solve again, or type your equation below.",
-                                options=[],
-                                affected_region={"x": 0, "y": 0, "w": 0, "h": 0},
-                                symbol_in_question=""
-                            )
-                        )
-                else:
-                    return RecognitionResult(
-                        candidates=[],
-                        needs_clarification=True,
-                        clarification=ClarificationRequest(
-                            id=str(uuid.uuid4())[:8],
-                            question=f"Could not read drawing (Vision status {resp.status_code}). Please check your drawing or type it below.",
-                            options=[],
-                            affected_region={"x": 0, "y": 0, "w": 0, "h": 0},
-                            symbol_in_question=""
-                        )
+                    data = resp.json()
+                    candidates = data.get("candidates", [])
+                    if candidates and "content" in candidates[0] and "parts" in candidates[0]["content"]:
+                        raw_text = candidates[0]["content"]["parts"][0].get("text", "").strip()
+
+        # Method B: OpenAI / Groq Compatible chat/completions fallback
+        if not raw_text:
+            payload = {
+                "model": settings.vision_llm_model,
+                "messages": [
+                    {
+                        "role": "user",
+                        "content": [
+                            {"type": "text", "text": ocr_prompt},
+                            {"type": "image_url", "image_url": {"url": img_data}}
+                        ]
+                    }
+                ],
+                "max_tokens": 120,
+                "temperature": 0.1
+            }
+            headers = {
+                "Authorization": f"Bearer {api_key}",
+                "Content-Type": "application/json",
+                "User-Agent": "MathAI/1.0"
+            }
+            async with httpx.AsyncClient(timeout=20.0) as client:
+                max_retries = 2
+                for attempt in range(max_retries):
+                    resp = await client.post(
+                        f"{settings.vision_llm_base_url}/chat/completions",
+                        json=payload,
+                        headers=headers
                     )
+                    if resp.status_code == 200:
+                        raw_text = resp.json()["choices"][0]["message"]["content"].strip()
+                        break
+                    elif resp.status_code == 429 and attempt < max_retries - 1:
+                        await asyncio.sleep(1.5)
+
+        if raw_text:
+            raw_text = re.sub(r'^```[a-zA-Z]*\n?', '', raw_text)
+            raw_text = re.sub(r'\n?```$', '', raw_text).strip()
+            raw_text = raw_text.replace("`", "").strip()
+            result = await recognize_typed(RecognizeTypedRequest(text=raw_text))
+            result.recognized_text = raw_text
+            return result
+        else:
+            return RecognitionResult(
+                candidates=[],
+                needs_clarification=True,
+                clarification=ClarificationRequest(
+                    id=str(uuid.uuid4())[:8],
+                    question="Could not clearly read the drawing or expression. Please write clearly or type it below.",
+                    options=[],
+                    affected_region={"x": 0, "y": 0, "w": 0, "h": 0},
+                    symbol_in_question=""
+                )
+            )
     except Exception as e:
         return RecognitionResult(
             candidates=[],
@@ -391,6 +420,10 @@ async def recognize_typed(request: RecognizeTypedRequest):
     def try_parse_single(s: str) -> Optional[RecognitionCandidate]:
         try:
             s_clean = s.strip()
+            # Normalize LaTeX fractions and square roots
+            s_clean = re.sub(r'\\frac\{([^}]+)\}\{([^}]+)\}', r'((\1)/(\2))', s_clean)
+            s_clean = re.sub(r'\\sqrt\{([^}]+)\}', r'sqrt(\1)', s_clean)
+            s_clean = s_clean.replace('\\times', '*').replace('\\div', '/').replace('^', '**')
             if "=" in s_clean and s_clean.count("=") == 1:
                 left, right = s_clean.split("=")
                 left_expr = parse_expr(left.strip(), transformations=transformations)
